@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NavispaceAI Scene Tests</title>
+    <style>
+      body { margin: 0; font-family: sans-serif; }
+      #status { padding: 8px; }
+      #testCanvas { width: 900px; height: 600px; border: 1px solid #ccc; }
+    </style>
+  </head>
+  <body>
+    <p id="status">Running scene tests...</p>
+    <div id="testCanvas"></div>
+
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://unpkg.com/three@0.180.0/build/three.module.js",
+          "three/addons/": "https://unpkg.com/three@0.180.0/examples/jsm/"
+        }
+      }
+    </script>
+    <script type="module" src="./scene.test.js"></script>
+  </body>
+</html>
