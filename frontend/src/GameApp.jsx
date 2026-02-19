@@ -7,7 +7,7 @@ import NavigationPanel from "./components/NavigationPanel";
 import ToastNotification from "./components/ToastNotification";
 import { findPath, getFloors, getRooms } from "./api/backendAPI";
 import { createAgentAnimator, gridPathToWorldPath } from "./scene/AgentAnimation";
-import { parseGameURL } from "./utils/gameURL";
+import { parseGameURL } from "./utils/game-url";
 
 /**
  * Dedicated standalone game runtime loaded in /game.html.

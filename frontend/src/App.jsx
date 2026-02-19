@@ -8,7 +8,7 @@ import {
   fetchBackendHealth,
   resolveBackendURL,
 } from "./api/backendAPI";
-import { buildGameURL } from "./utils/gameURL";
+import { buildGameURL } from "./utils/game-url";
 
 const BACKEND_URL_STORAGE_KEY = "navispace_public_backend_url_v1";
 const RECENT_BUILDS_STORAGE_KEY = "navispace_recent_builds_v1";
