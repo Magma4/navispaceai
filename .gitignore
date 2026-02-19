@@ -1,0 +1,93 @@
+# ------------------------------
+# OS / editor noise
+# ------------------------------
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.iml
+*.swp
+*.swo
+*~
+
+# ------------------------------
+# Python caches / tooling
+# ------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+.ipynb_checkpoints/
+.python-version
+
+# ------------------------------
+# Virtual environments
+# ------------------------------
+.venv/
+venv/
+env/
+ENV/
+navEnv/
+
+# ------------------------------
+# Environment files (keep examples)
+# ------------------------------
+.env
+.env.*
+!.env.example
+backend/.env
+backend/.env.*
+!backend/.env.example
+frontend/.env
+frontend/.env.*
+!frontend/.env.example
+
+# ------------------------------
+# Backend generated artifacts
+# ------------------------------
+backend/generated/
+backend/ml/checkpoints/
+*.pt
+*.pth
+*.ckpt
+*.onnx
+
+# ------------------------------
+# Datasets / large archives
+# ------------------------------
+data/
+!data/.gitkeep
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.tar.xz
+*.xz
+
+# ------------------------------
+# Frontend build artifacts
+# ------------------------------
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ------------------------------
+# Test / runtime outputs
+# ------------------------------
+coverage/
+coverage.xml
+junit*.xml
+*.log
+tmp/
+temp/
