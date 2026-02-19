@@ -18,6 +18,7 @@ export default function AutonomousModeToggle({
   return (
     <section className="panel auto-panel" aria-label="Autonomous navigation controls">
       <h2>Autonomous Navigation</h2>
+      <p className="muted">Enable hands-free movement along computed routes with optional chase camera.</p>
 
       <button
         className={`btn ${enabled ? "btn-danger" : "btn-primary"}`}
@@ -30,7 +31,7 @@ export default function AutonomousModeToggle({
         {enabled ? "Disable Autonomous Mode" : "Enable Autonomous Mode"}
       </button>
 
-      <label className="checkbox" htmlFor="follow-camera">
+      <label className="checkbox compact" htmlFor="follow-camera">
         <input
           id="follow-camera"
           type="checkbox"
