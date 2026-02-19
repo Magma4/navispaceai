@@ -6,6 +6,34 @@ import { segmentCollisionCheck } from "./CollisionManager";
  */
 
 /**
+ * Normalize an angle delta to [-PI, PI].
+ *
+ * @param {number} angle
+ * @returns {number}
+ */
+function normalizeAngle(angle) {
+  const twoPi = Math.PI * 2;
+  let out = angle;
+  while (out > Math.PI) out -= twoPi;
+  while (out < -Math.PI) out += twoPi;
+  return out;
+}
+
+/**
+ * Blend between two yaw angles using shortest-turn interpolation.
+ *
+ * @param {number} from
+ * @param {number} to
+ * @param {number} t
+ * @returns {number}
+ */
+function lerpAngle(from, to, t) {
+  const clamped = Math.max(0, Math.min(1, t));
+  const delta = normalizeAngle(to - from);
+  return from + delta * clamped;
+}
+
+/**
  * Convert backend grid path to world path.
  *
  * Supports future multi-floor points by preserving optional `y` and `floor` fields.
@@ -126,7 +154,22 @@ export function createAgentAnimator({
     }
 
     segmentT = nextT;
-    const yaw = Math.atan2(dz, dx);
+    let yaw = Math.atan2(dz, dx);
+
+    // Smooth heading transitions near corners by blending toward next segment direction.
+    const c = path[segmentIndex + 2];
+    if (c) {
+      const nextDx = c.x - b.x;
+      const nextDz = c.z - b.z;
+      if (Math.hypot(nextDx, nextDz) > 1e-6) {
+        const nextYaw = Math.atan2(nextDz, nextDx);
+        const blendStart = 0.72;
+        if (segmentT > blendStart) {
+          const turnBlend = (segmentT - blendStart) / (1 - blendStart);
+          yaw = lerpAngle(yaw, nextYaw, turnBlend * 0.65);
+        }
+      }
+    }
 
     onUpdate?.({ ...to }, yaw, { segmentIndex, floor: a.floor ?? null });
 
