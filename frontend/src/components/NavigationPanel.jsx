@@ -32,6 +32,7 @@ import { BACKEND_BASE_URL, findPath } from "../api/backendAPI";
  * @param {boolean} [props.debugOverlay=false]
  * @param {(next:boolean)=>void} [props.onDebugOverlayChange]
  * @param {string|number} [props.activeFloor="Floor 1"]
+ * @param {(params:{start:{row:number,col:number},goal:{row:number,col:number},reason:"compute"|"replan"})=>Promise<{path?:Array,world_path?:Array,grid_path?:Array}>} [props.pathRequest]
  */
 export default function NavigationPanel({
   backendBaseUrl = BACKEND_BASE_URL,
@@ -53,6 +54,7 @@ export default function NavigationPanel({
   debugOverlay = false,
   onDebugOverlayChange,
   activeFloor = "Floor 1",
+  pathRequest,
 }) {
   const [startRow, setStartRow] = useState("");
   const [startCol, setStartCol] = useState("");
@@ -116,17 +118,21 @@ export default function NavigationPanel({
       onStartChange?.(parsedStart);
       onGoalChange?.(parsedGoal);
 
-      const response = await findPath(parsedStart, parsedGoal, true, backendBaseUrl);
+      const response = pathRequest
+        ? await pathRequest({ start: parsedStart, goal: parsedGoal, reason })
+        : await findPath(parsedStart, parsedGoal, true, backendBaseUrl);
+      const gridPath = response.path || response.grid_path || [];
+      const worldPath = response.world_path || [];
       onPathComputed?.({
-        gridPath: response.path || [],
-        worldPath: response.world_path || [],
+        gridPath,
+        worldPath,
         reason,
       });
 
       if (reason === "replan") {
-        onNotify?.(`Path re-planned (${response.path?.length || 0} waypoints).`, "info");
+        onNotify?.(`Path re-planned (${gridPath?.length || 0} waypoints).`, "info");
       } else {
-        onNotify?.(`Path found (${response.path?.length || 0} waypoints).`, "success");
+        onNotify?.(`Path found (${gridPath?.length || 0} waypoints).`, "success");
       }
     } catch (error) {
       onNotify?.(error.message || "Failed to compute path.", "error");
@@ -156,7 +162,6 @@ export default function NavigationPanel({
     parsedStart,
     parsedGoal,
     gridShape,
-    loading,
   ]);
 
   /**
@@ -229,11 +234,11 @@ export default function NavigationPanel({
         </div>
       </div>
 
-      <div className="muted" aria-live="polite" style={{ marginBottom: 8 }}>
+      <div className="muted nav-grid-meta" aria-live="polite">
         {gridShape ? `Grid: ${gridShape.rows} x ${gridShape.cols}` : "Process a blueprint to load occupancy grid."}
       </div>
 
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+      <div className="action-row">
         <button className="btn btn-primary" type="button" onClick={() => requestPath("compute")} disabled={computeDisabled}>
           {loading ? "Computing..." : "Compute A* Path"}
         </button>
@@ -242,10 +247,10 @@ export default function NavigationPanel({
         </button>
       </div>
 
-      <hr style={{ border: "none", borderTop: "1px solid var(--border)", margin: "10px 0" }} />
+      <hr className="panel-divider" />
 
-      <div style={{ display: "grid", gap: 10 }}>
-        <label className="checkbox" style={{ marginTop: 0 }}>
+      <div className="control-stack">
+        <label className="checkbox compact">
           <input
             type="checkbox"
             checked={autonomousEnabled}
@@ -254,7 +259,7 @@ export default function NavigationPanel({
           <span>Autonomous Mode</span>
         </label>
 
-        <label>
+        <label className="field-group">
           <span className="muted">Camera Mode</span>
           <select
             className="select"
@@ -266,7 +271,7 @@ export default function NavigationPanel({
           </select>
         </label>
 
-        <label>
+        <label className="field-group">
           <span className="muted">Agent Speed: {Number(agentSpeed).toFixed(2)} m/s</span>
           <input
             type="range"
@@ -278,7 +283,7 @@ export default function NavigationPanel({
           />
         </label>
 
-        <label className="checkbox" style={{ marginTop: 0 }}>
+        <label className="checkbox compact">
           <input
             type="checkbox"
             checked={debugOverlay}
