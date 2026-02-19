@@ -22,12 +22,18 @@ export default function ToastNotification({ message, type = "info", onClose, dur
 
   if (!message) return null;
 
+  const icon = type === "success" ? "✓" : type === "error" ? "!" : "i";
+
   return (
     <div className={`toast toast-${type}`} role="status" aria-live="polite">
-      <span>{message}</span>
+      <span className="toast-icon" aria-hidden="true">
+        {icon}
+      </span>
+      <span className="toast-message">{message}</span>
       <button className="icon-btn" type="button" onClick={onClose} aria-label="Close notification">
         ×
       </button>
+      <span className="toast-bar" aria-hidden="true" />
     </div>
   );
 }
