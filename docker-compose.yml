@@ -1,0 +1,76 @@
+version: "3.9"
+
+# NavispaceAI production-like local stack.
+# - frontend: React + Three.js static app
+# - backend: FastAPI CV/pathfinding/model API
+# - postgres: optional persistence backend for building/room metadata
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+      args:
+        INSTALL_ML: ${INSTALL_ML:-false}
+    container_name: navispaceai-backend
+    env_file:
+      - backend/.env.example
+    environment:
+      # Override defaults in real deployments with backend/.env file.
+      API_HOST: 0.0.0.0
+      API_PORT: 8000
+      API_RELOAD: "false"
+      BUILDING_ASSETS_PATH: /app/assets
+      DATABASE_URL: ${DATABASE_URL:-postgresql://navispace:navispace@postgres:5432/navispace}
+      NAVISPACE_ENABLE_ML: ${NAVISPACE_ENABLE_ML:-false}
+      NAVISPACE_SEG_MODEL: ${NAVISPACE_SEG_MODEL:-/app/backend/ml/checkpoints/wall_door_unet.pt}
+      NAVISPACE_SEG_DEVICE: ${NAVISPACE_SEG_DEVICE:-cpu}
+      NAVISPACE_SEG_INPUT_SIZE: ${NAVISPACE_SEG_INPUT_SIZE:-768}
+      NAVISPACE_SEG_THRESHOLD: ${NAVISPACE_SEG_THRESHOLD:-0.45}
+    ports:
+      - "8000:8000"
+    volumes:
+      # Mount shared assets/generated outputs for demos and inspection.
+      - ./assets:/app/assets
+      - ./backend/generated:/app/backend/generated
+      - ./backend/ml/checkpoints:/app/backend/ml/checkpoints
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        # Build frontend against backend URL exposed from host.
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
+        REACT_APP_API_URL: ${REACT_APP_API_URL:-http://localhost:8000}
+    container_name: navispaceai-frontend
+    environment:
+      NODE_ENV: production
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: navispaceai-postgres
+    profiles: ["db"]
+    environment:
+      POSTGRES_USER: navispace
+      POSTGRES_PASSWORD: navispace
+      POSTGRES_DB: navispace
+    ports:
+      - "5432:5432"
+    volumes:
+      - navispace-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U navispace -d navispace"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  navispace-postgres-data:
