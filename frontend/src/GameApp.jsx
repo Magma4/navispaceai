@@ -44,8 +44,13 @@ export default function GameApp() {
   const [cameraMode, setCameraMode] = useState("orbit");
   const [debugOverlay, setDebugOverlay] = useState(false);
   const [cameraPresetRequest, setCameraPresetRequest] = useState(null);
+  const [rerouteCount, setRerouteCount] = useState(0);
 
   const animatorRef = useRef(null);
+  const goalCellRef = useRef(null);
+  const autonomousRef = useRef(true);
+  const projectMetaRef = useRef(null);
+  const replanInFlightRef = useRef(false);
 
   const sortedFloors = useMemo(() => {
     const raw = floorsMeta?.floors;
@@ -91,6 +96,26 @@ export default function GameApp() {
     setToast({ message, type });
   }
 
+  function worldToGridCell(point, cellSizeM, gridShape) {
+    if (!point || !cellSizeM || !gridShape) return null;
+    return {
+      row: Math.max(0, Math.min(gridShape.rows - 1, Math.round(point.z / cellSizeM))),
+      col: Math.max(0, Math.min(gridShape.cols - 1, Math.round(point.x / cellSizeM))),
+    };
+  }
+
+  useEffect(() => {
+    goalCellRef.current = goalCell;
+  }, [goalCell]);
+
+  useEffect(() => {
+    autonomousRef.current = autonomousEnabled;
+  }, [autonomousEnabled]);
+
+  useEffect(() => {
+    projectMetaRef.current = projectMeta;
+  }, [projectMeta]);
+
   /**
    * Stop and release active animator.
    */
@@ -124,8 +149,38 @@ export default function GameApp() {
             setAgentPosition({ x: position.x, z: position.z });
             setAgentYaw(yaw);
           },
-          onCollision: () => {
-            showToast("Agent collision detected. Path stopped.", "error");
+          onCollision: async ({ position }) => {
+            const goal = goalCellRef.current;
+            const meta = projectMetaRef.current;
+            if (!autonomousRef.current || !goal || !meta?.grid_shape || !meta?.cell_size_m) {
+              showToast("Agent collision detected. Path stopped.", "error");
+              return;
+            }
+
+            if (replanInFlightRef.current) return;
+            replanInFlightRef.current = true;
+            try {
+              const start = worldToGridCell(position, meta.cell_size_m, meta.grid_shape);
+              if (!start) throw new Error("Unable to replan: invalid collision position.");
+
+              const response = await findPath(start, goal, true, config.backendBaseUrl);
+              const rerouteGrid = response?.smoothed_path?.length ? response.smoothed_path : (response.path || []);
+              const rerouteWorld = response?.smoothed_world_path?.length
+                ? response.smoothed_world_path
+                : (response.world_path || []);
+
+              handlePathComputed({
+                gridPath: rerouteGrid,
+                worldPath: rerouteWorld,
+                reason: "replan",
+              });
+              setRerouteCount((v) => v + 1);
+              showToast("Obstacle hit. Auto re-routing complete.", "info");
+            } catch (error) {
+              showToast(error.message || "Auto re-routing failed.", "error");
+            } finally {
+              replanInFlightRef.current = false;
+            }
           },
           onComplete: ({ reason }) => {
             setAgentMoving(false);
@@ -142,7 +197,7 @@ export default function GameApp() {
       animatorRef.current.start();
       setAgentMoving(true);
     },
-    [agentSpeed, projectMeta?.cell_size_m, projectMeta?.grid, stopAnimator]
+    [agentSpeed, config.backendBaseUrl, projectMeta?.cell_size_m, projectMeta?.grid, stopAnimator]
   );
 
   /**
@@ -295,6 +350,9 @@ export default function GameApp() {
 
     setGridPath(nextGridPath);
     setWorldPath(nextWorldPath);
+    if (payload?.reason === "compute") {
+      setRerouteCount(0);
+    }
 
     if (nextWorldPath.length > 0) {
       const first = nextWorldPath[0];
@@ -320,6 +378,7 @@ export default function GameApp() {
     setWorldPath([]);
     setAgentPosition(null);
     setAgentYaw(0);
+    setRerouteCount(0);
     stopAnimator();
   }
 
@@ -329,7 +388,14 @@ export default function GameApp() {
    * @param {{start:{row:number,col:number},goal:{row:number,col:number}}} params
    */
   async function requestPath(params) {
-    return findPath(params.start, params.goal, true, config.backendBaseUrl);
+    const response = await findPath(params.start, params.goal, true, config.backendBaseUrl);
+    return {
+      ...response,
+      path: response?.smoothed_path?.length ? response.smoothed_path : (response?.path || []),
+      world_path: response?.smoothed_world_path?.length
+        ? response.smoothed_world_path
+        : (response?.world_path || []),
+    };
   }
 
   /**
@@ -505,6 +571,8 @@ export default function GameApp() {
             <div className="scene-badges">
               <span className="status-pill">Mode: {isMultiFloor ? "Multi-floor" : "Single-floor"}</span>
               <span className="status-pill">Waypoints: {gridPath.length}</span>
+              <span className="status-pill">Re-routes: {rerouteCount}</span>
+              <span className="status-pill">Auto: {autonomousEnabled ? "ON" : "OFF"}</span>
               <span className="status-pill">Floor: {`Floor ${selectedFloorNumber}`}</span>
             </div>
           </div>
