@@ -1724,3 +1724,55 @@ input[type="range"]::-webkit-slider-thumb {
     grid-template-columns: 1fr;
   }
 }
+
+.bim-panel .bim-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.bim-issues-grid {
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.bim-issue-chip {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #f5f9ff;
+  padding: 6px 8px;
+  font-size: 0.8rem;
+  color: #2b4660;
+}
+
+.bim-issues-list {
+  margin-top: 10px;
+}
+
+.bim-issues-list summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.bim-issues-items {
+  margin-top: 8px;
+  display: grid;
+  gap: 8px;
+  max-height: 240px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.bim-issue-row {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fbfdff;
+  padding: 8px;
+  display: grid;
+  gap: 2px;
+}

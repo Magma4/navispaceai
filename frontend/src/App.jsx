@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import UploadForm from "./components/UploadForm";
 import FrameHero from "./components/FrameHero";
 import ToastNotification from "./components/ToastNotification";
+import BIMDiagnosticsPanel from "./components/BIMDiagnosticsPanel";
 import {
   BACKEND_BASE_URL,
   fetchBackendHealth,
@@ -620,6 +621,8 @@ export default function App() {
               </>
             )}
           </section>
+
+          <BIMDiagnosticsPanel projectMeta={projectMeta} />
 
           <section className="panel recent-panel" aria-label="Recent builds">
             <h2>Recent Builds</h2>
