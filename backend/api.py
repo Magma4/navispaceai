@@ -39,7 +39,7 @@ from backend.grid3D import (
     normalize_floor_grids,
 )
 from backend.modeling import build_model_from_walls
-from backend.pathfinding import astar
+from backend.pathfinding import astar, smooth_path
 from backend.pathfinding3D import find_path_3d_world
 from backend.preprocessing import preprocess_blueprint
 from backend.utils import ensure_directories, grid_to_world, json_grid, to_serializable_path
@@ -87,6 +87,8 @@ class PathResponse(BaseModel):
 
     path: list[dict[str, int]]
     world_path: list[dict[str, float]]
+    smoothed_path: list[dict[str, int]] | None = None
+    smoothed_world_path: list[dict[str, float]] | None = None
 
 
 class WorldPoint(BaseModel):
@@ -540,7 +542,18 @@ def create_app() -> FastAPI:
             x, z = grid_to_world(row, col, STATE.cell_size_m)
             world_path.append({"x": x, "z": z})
 
-        return PathResponse(path=to_serializable_path(path), world_path=world_path)
+        smoothed = smooth_path(STATE.grid, path)
+        smoothed_world_path = []
+        for row, col in smoothed:
+            x, z = grid_to_world(row, col, STATE.cell_size_m)
+            smoothed_world_path.append({"x": x, "z": z})
+
+        return PathResponse(
+            path=to_serializable_path(path),
+            world_path=world_path,
+            smoothed_path=to_serializable_path(smoothed),
+            smoothed_world_path=smoothed_world_path,
+        )
 
     @app.post("/process-building")
     async def process_building(

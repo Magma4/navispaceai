@@ -21,6 +21,35 @@ import numpy as np
 GridPoint = tuple[int, int]
 
 
+def _line_is_free(grid: np.ndarray, a: GridPoint, b: GridPoint) -> bool:
+    """Check line-of-sight between two grid points using Bresenham traversal."""
+    r0, c0 = a
+    r1, c1 = b
+
+    dr = abs(r1 - r0)
+    dc = abs(c1 - c0)
+    sr = 1 if r0 < r1 else -1
+    sc = 1 if c0 < c1 else -1
+
+    err = dr - dc
+    r, c = r0, c0
+
+    while True:
+        if grid[r, c] == 1:
+            return False
+        if r == r1 and c == c1:
+            break
+        e2 = 2 * err
+        if e2 > -dc:
+            err -= dc
+            r += sr
+        if e2 < dr:
+            err += dr
+            c += sc
+
+    return True
+
+
 def _validate_grid(grid: np.ndarray) -> None:
     """Validate occupancy grid contract (2D, non-empty, binary-ish)."""
     if not isinstance(grid, np.ndarray):
@@ -72,6 +101,29 @@ def _neighbors(point: GridPoint, grid: np.ndarray, diagonal: bool = True) -> lis
         result.append(((nr, nc), cost))
 
     return result
+
+
+def smooth_path(grid: np.ndarray, path: list[GridPoint]) -> list[GridPoint]:
+    """Shortcut an A* path while preserving collision safety.
+
+    Keeps endpoints and removes intermediate nodes when direct line-of-sight exists.
+    """
+    _validate_grid(grid)
+    if len(path) <= 2:
+        return list(path)
+
+    smoothed: list[GridPoint] = [path[0]]
+    i = 0
+    while i < len(path) - 1:
+        j = len(path) - 1
+        while j > i + 1:
+            if _line_is_free(grid, path[i], path[j]):
+                break
+            j -= 1
+        smoothed.append(path[j])
+        i = j
+
+    return smoothed
 
 
 def astar(grid: np.ndarray, start: GridPoint, goal: GridPoint, diagonal: bool = True) -> list[GridPoint]:

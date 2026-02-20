@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from backend.pathfinding import astar
+from backend.pathfinding import astar, smooth_path
 
 
 def test_astar_returns_path_on_open_grid() -> None:
@@ -42,3 +42,29 @@ def test_astar_non_binary_grid_raises() -> None:
     grid = np.array([[0, 2], [0, 0]], dtype=np.uint8)
     with pytest.raises(ValueError, match="only 0 .* 1"):
         astar(grid, (0, 0), (1, 1))
+
+
+def test_smooth_path_shortcuts_open_diagonal() -> None:
+    """Smoothing should reduce redundant interior points on open grids."""
+    grid = np.zeros((8, 8), dtype=np.uint8)
+    raw = astar(grid, (0, 0), (7, 7), diagonal=True)
+    smoothed = smooth_path(grid, raw)
+
+    assert smoothed[0] == (0, 0)
+    assert smoothed[-1] == (7, 7)
+    assert len(smoothed) <= len(raw)
+
+
+def test_smooth_path_respects_obstacles() -> None:
+    """Smoothing must not cut through blocked cells."""
+    grid = np.zeros((7, 7), dtype=np.uint8)
+    grid[1:6, 3] = 1
+    grid[3, 3] = 1
+
+    raw = astar(grid, (0, 0), (6, 6), diagonal=True)
+    smoothed = smooth_path(grid, raw)
+
+    for r, c in smoothed:
+        assert grid[r, c] == 0
+    assert smoothed[0] == (0, 0)
+    assert smoothed[-1] == (6, 6)
