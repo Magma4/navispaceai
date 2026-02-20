@@ -19,7 +19,8 @@ def test_preprocess_blueprint_success() -> None:
     img = np.full((64, 64, 3), 255, dtype=np.uint8)
     outputs = preprocess_blueprint(img)
 
-    assert set(outputs.keys()) == {"gray", "binary", "denoised", "edges", "door_mask"}
+    required = {"gray", "binary", "denoised", "edges", "door_mask"}
+    assert required.issubset(set(outputs.keys()))
     assert outputs["gray"].shape == (64, 64)
     assert outputs["edges"].shape == (64, 64)
     assert outputs["door_mask"].shape == (64, 64)

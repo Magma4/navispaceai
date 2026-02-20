@@ -13,7 +13,10 @@ def test_health_endpoint() -> None:
     client = TestClient(create_app())
     res = client.get("/health")
     assert res.status_code == 200
-    assert res.json() == {"status": "ok"}
+    payload = res.json()
+    assert payload["status"] == "ok"
+    assert "version" in payload
+    assert "mode" in payload
 
 
 def test_find_path_without_processed_blueprint_returns_400() -> None:
