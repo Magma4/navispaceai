@@ -30,6 +30,7 @@ from backend.detection import (
     filter_door_candidates,
     filter_wall_segments,
 )
+from backend.geometry_validation import validate_scene_graph
 from backend.grid import export_grid_json, walls_to_occupancy_grid
 from backend.grid3D import (
     ConnectorNode,
@@ -42,6 +43,7 @@ from backend.modeling import build_model_from_walls
 from backend.pathfinding import astar, smooth_path
 from backend.pathfinding3D import find_path_3d_world
 from backend.preprocessing import preprocess_blueprint
+from backend.scene_graph import build_scene_graph
 from backend.utils import ensure_directories, grid_to_world, json_grid, to_serializable_path
 
 MODEL_SCALE_M_PER_PX = 0.05
@@ -593,6 +595,7 @@ def create_app() -> FastAPI:
             )
 
             ts = int(time.time() * 1000)
+            floor_artifacts: dict[int, dict[str, Any]] = {}
 
             for idx, upload in enumerate(files):
                 if not upload.filename:
@@ -638,6 +641,11 @@ def create_app() -> FastAPI:
                     primary_bbox=pre.get("primary_bbox"),
                     bbox_margin_px=max(18, int(min(pre["gray"].shape) * 0.015)),
                 )
+
+                floor_artifacts[int(floor_number)] = {
+                    "walls": walls,
+                    "doors": doors,
+                }
 
                 model_filename = f"model_{_safe_stem(building_id)}_f{floor_number}_{ts}_{idx}.glb"
                 model_path = f"backend/generated/models/{model_filename}"
@@ -693,6 +701,19 @@ def create_app() -> FastAPI:
             )
             nav_grid3d = carve_connector_clearance(inflated_grid3d, connector_nodes)
 
+            floors_payload = manager.get_floors_payload()["floors"]
+            rooms_payload = manager.get_rooms_payload()["rooms"]
+            scene_graph = build_scene_graph(
+                building_id=manager.meta.building_id,
+                floor_height_m=manager.meta.floor_height_m,
+                model_scale_m_per_px=MODEL_SCALE_M_PER_PX,
+                floors_payload=floors_payload,
+                rooms_payload=rooms_payload,
+                connectors_payload=connector_dicts,
+                floor_artifacts=floor_artifacts,
+            )
+            validation_report = validate_scene_graph(scene_graph)
+
             STATE.building_manager = manager
             STATE.grid3d = nav_grid3d
             STATE.ordered_floors = ordered_floors
@@ -716,9 +737,11 @@ def create_app() -> FastAPI:
                 },
                 "cell_size_m": manager.default_cell_size_m,
                 "floor_height_m": manager.meta.floor_height_m,
-                "floors": manager.get_floors_payload()["floors"],
+                "floors": floors_payload,
                 "connectors": connector_dicts,
-                "rooms": manager.get_rooms_payload()["rooms"],
+                "rooms": rooms_payload,
+                "scene_graph": scene_graph,
+                "validation_report": validation_report,
             }
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=f"Building processing failed: {exc}") from exc

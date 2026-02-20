@@ -41,6 +41,9 @@ def test_process_building_returns_floors_rooms_and_connectors() -> None:
     assert len(body["floors"]) == 2
     assert len(body["rooms"]) > 0
     assert len(body["connectors"]) >= 1
+    assert "scene_graph" in body
+    assert "validation_report" in body
+    assert len(body["scene_graph"]["levels"]) == 2
 
     floors_res = client.get("/floors")
     rooms_res = client.get("/rooms")
