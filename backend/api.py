@@ -44,6 +44,7 @@ from backend.pathfinding import astar, smooth_path
 from backend.pathfinding3D import find_path_3d_world
 from backend.preprocessing import preprocess_blueprint
 from backend.scene_graph import build_scene_graph
+from backend.room_connectivity import build_room_connectivity, shortest_room_route
 from backend.utils import ensure_directories, grid_to_world, json_grid, to_serializable_path
 
 MODEL_SCALE_M_PER_PX = 0.05
@@ -64,6 +65,7 @@ class ProcessingState:
     grid3d: np.ndarray | None = None
     ordered_floors: list[int] = field(default_factory=list)
     connector_nodes: list[ConnectorNode] = field(default_factory=list)
+    room_connectivity: dict[str, Any] | None = None
 
 
 STATE = ProcessingState()
@@ -713,11 +715,13 @@ def create_app() -> FastAPI:
                 floor_artifacts=floor_artifacts,
             )
             validation_report = validate_scene_graph(scene_graph)
+            room_connectivity = build_room_connectivity(rooms_payload, connector_dicts)
 
             STATE.building_manager = manager
             STATE.grid3d = nav_grid3d
             STATE.ordered_floors = ordered_floors
             STATE.connector_nodes = connector_nodes
+            STATE.room_connectivity = room_connectivity
 
             # Keep single-floor state populated for compatibility with existing UI.
             first_floor = manager.get_floor(ordered_floors[0])
@@ -742,6 +746,7 @@ def create_app() -> FastAPI:
                 "rooms": rooms_payload,
                 "scene_graph": scene_graph,
                 "validation_report": validation_report,
+                "room_connectivity": room_connectivity,
             }
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=f"Building processing failed: {exc}") from exc
@@ -772,6 +777,32 @@ def create_app() -> FastAPI:
         return {
             "building_id": manager.meta.building_id,
             "rooms": [_serialize_room(room) for room in rooms],
+        }
+
+    @app.get("/room-connectivity")
+    async def get_room_connectivity() -> dict[str, Any]:
+        """Return latest room-level connectivity graph for semantic routing."""
+        _latest_building_or_400()
+        if STATE.room_connectivity is None:
+            raise HTTPException(status_code=400, detail="Room connectivity graph is not initialized")
+        return STATE.room_connectivity
+
+    @app.get("/room-route")
+    async def get_room_route(start_room_id: str = Query(...), goal_room_id: str = Query(...)) -> dict[str, Any]:
+        """Return semantic room-to-room route over connectivity graph."""
+        _latest_building_or_400()
+        if STATE.room_connectivity is None:
+            raise HTTPException(status_code=400, detail="Room connectivity graph is not initialized")
+
+        route = shortest_room_route(STATE.room_connectivity, start_room_id=start_room_id, goal_room_id=goal_room_id)
+        if not route:
+            raise HTTPException(status_code=404, detail="No room route found")
+
+        return {
+            "start_room_id": start_room_id,
+            "goal_room_id": goal_room_id,
+            "room_route": route,
+            "hops": max(0, len(route) - 1),
         }
 
     @app.post("/find-path-3d", response_model=Path3DResponse)
