@@ -14,6 +14,7 @@ from __future__ import annotations
 import math
 from pathlib import Path
 
+import cv2
 import numpy as np
 import trimesh
 
@@ -81,6 +82,55 @@ def _compute_wall_bounds_m(
     return min(xs), max(xs), min(zs), max(zs)
 
 
+def _raster_wall_run_meshes(
+    wall_mask: np.ndarray,
+    *,
+    model_scale_m_per_px: float,
+    wall_height_m: float,
+    wall_thickness_m: float,
+    min_run_px: int = 6,
+) -> list[trimesh.Trimesh]:
+    """Create wall boxes from horizontal runs on a denoised binary wall mask."""
+    if wall_mask is None or wall_mask.size == 0 or wall_mask.ndim != 2:
+        return []
+
+    # Mild downsample to reduce mesh count while preserving global structure.
+    down = 2
+    resized = cv2.resize(
+        (wall_mask > 0).astype(np.uint8) * 255,
+        (max(1, wall_mask.shape[1] // down), max(1, wall_mask.shape[0] // down)),
+        interpolation=cv2.INTER_NEAREST,
+    )
+    scale = model_scale_m_per_px * down
+
+    meshes: list[trimesh.Trimesh] = []
+    rows, cols = resized.shape
+    for r in range(rows):
+        row = resized[r]
+        c = 0
+        while c < cols:
+            if row[c] == 0:
+                c += 1
+                continue
+            start = c
+            while c < cols and row[c] > 0:
+                c += 1
+            end = c - 1
+            run_len = end - start + 1
+            if run_len < int(min_run_px):
+                continue
+
+            length_m = max(0.08, run_len * scale)
+            center_x = ((start + end) * 0.5) * scale
+            center_z = r * scale
+
+            wall_mesh = trimesh.creation.box(extents=(length_m, wall_height_m, wall_thickness_m))
+            wall_mesh.apply_translation((center_x, wall_height_m / 2.0, center_z))
+            meshes.append(wall_mesh)
+
+    return meshes
+
+
 def extrude_walls_to_scene(
     walls: list[WallSegment],
     image_shape: tuple[int, int],
@@ -88,6 +138,7 @@ def extrude_walls_to_scene(
     wall_height_m: float = 3.0,
     wall_thickness_m: float = 0.15,
     door_candidates: list[DoorCandidate] | None = None,
+    wall_mask: np.ndarray | None = None,
     floor_color_rgba: tuple[int, int, int, int] = (192, 203, 214, 255),
     wall_color_rgba: tuple[int, int, int, int] = (88, 95, 108, 255),
     door_color_rgba: tuple[int, int, int, int] = (182, 132, 78, 255),
@@ -137,6 +188,17 @@ def extrude_walls_to_scene(
     _apply_face_color(floor, floor_color_rgba)
     scene.add_geometry(floor, geom_name="floor")
 
+    raster_meshes = _raster_wall_run_meshes(
+        wall_mask if wall_mask is not None else np.zeros(image_shape, dtype=np.uint8),
+        model_scale_m_per_px=model_scale_m_per_px,
+        wall_height_m=wall_height_m,
+        wall_thickness_m=wall_thickness_m,
+    )
+    for idx, wall_mesh in enumerate(raster_meshes):
+        _apply_face_color(wall_mesh, wall_color_rgba)
+        scene.add_geometry(wall_mesh, geom_name=f"wall_raster_{idx}")
+
+    # Keep vector walls too; they add directional fidelity on top of raster runs.
     for idx, seg in enumerate(walls):
         x1 = seg["x1"] * model_scale_m_per_px
         z1 = seg["y1"] * model_scale_m_per_px
@@ -158,7 +220,7 @@ def extrude_walls_to_scene(
         wall_mesh.apply_transform(transform)
         _apply_face_color(wall_mesh, wall_color_rgba)
 
-        scene.add_geometry(wall_mesh, geom_name=f"wall_{idx}")
+        scene.add_geometry(wall_mesh, geom_name=f"wall_vec_{idx}")
 
     # Add distinct door meshes so doors can be rendered with a separate color.
     # These are thin vertical slabs centered on detected door boxes.
@@ -223,6 +285,7 @@ def build_model_from_walls(
     wall_height_m: float = 3.0,
     model_scale_m_per_px: float = 0.05,
     door_candidates: list[DoorCandidate] | None = None,
+    wall_mask: np.ndarray | None = None,
 ) -> str:
     """High-level helper to construct and export a 3D model from wall segments.
 
@@ -243,5 +306,6 @@ def build_model_from_walls(
         model_scale_m_per_px=model_scale_m_per_px,
         wall_height_m=wall_height_m,
         door_candidates=door_candidates,
+        wall_mask=wall_mask,
     )
     return export_scene_glb(scene, output_path)

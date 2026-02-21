@@ -467,6 +467,7 @@ def create_app() -> FastAPI:
                 wall_height_m=3.0,
                 model_scale_m_per_px=MODEL_SCALE_M_PER_PX,
                 door_candidates=doors,
+                wall_mask=pre.get("denoised"),
             )
 
             STATE.grid = grid
@@ -666,6 +667,7 @@ def create_app() -> FastAPI:
                     wall_height_m=3.0,
                     model_scale_m_per_px=MODEL_SCALE_M_PER_PX,
                     door_candidates=doors,
+                    wall_mask=pre.get("denoised"),
                 )
                 floor_meta.model_url = f"/generated/models/{model_filename}"
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
 import trimesh
 import pytest
 
@@ -45,3 +46,18 @@ def test_build_model_from_walls_creates_glb(tmp_path: Path) -> None:
         output_path=str(output),
     )
     assert Path(path).exists()
+
+
+def test_extrude_walls_to_scene_uses_wall_mask_runs() -> None:
+    """Raster wall mask should generate additional wall geometry."""
+    wall_mask = np.zeros((64, 64), dtype=np.uint8)
+    wall_mask[20:24, 8:56] = 255
+
+    scene = extrude_walls_to_scene(
+        walls=[],
+        image_shape=(64, 64),
+        wall_mask=wall_mask,
+    )
+
+    assert isinstance(scene, trimesh.Scene)
+    assert any(name.startswith("wall_raster_") for name in scene.geometry.keys())
