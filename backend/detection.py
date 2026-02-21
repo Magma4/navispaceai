@@ -126,6 +126,87 @@ def extract_walls_from_mask(
     return segments
 
 
+def merge_collinear_wall_segments(
+    walls: list[WallSegment],
+    *,
+    angle_tolerance_deg: float = 8.0,
+    endpoint_gap_px: float = 18.0,
+) -> list[WallSegment]:
+    """Merge near-collinear wall segments with close endpoints.
+
+    Reduces fragmented stick-like geometry in exported 3D meshes.
+    """
+    if not walls:
+        return []
+
+    def _angle(seg: WallSegment) -> float:
+        return math.degrees(math.atan2(float(seg["y2"] - seg["y1"]), float(seg["x2"] - seg["x1"])))
+
+    def _norm(a: float) -> float:
+        while a < -90:
+            a += 180
+        while a > 90:
+            a -= 180
+        return a
+
+    def _dist2(a: tuple[float, float], b: tuple[float, float]) -> float:
+        dx = a[0] - b[0]
+        dy = a[1] - b[1]
+        return dx * dx + dy * dy
+
+    remaining = [dict(seg) for seg in walls]
+    merged: list[WallSegment] = []
+    gap2 = float(endpoint_gap_px) * float(endpoint_gap_px)
+
+    while remaining:
+        base = remaining.pop()
+        changed = True
+        while changed:
+            changed = False
+            a0 = _norm(_angle(base))
+            p1 = (float(base["x1"]), float(base["y1"]))
+            p2 = (float(base["x2"]), float(base["y2"]))
+            line_pts = [p1, p2]
+
+            keep: list[WallSegment] = []
+            for seg in remaining:
+                a1 = _norm(_angle(seg))
+                if abs(a0 - a1) > float(angle_tolerance_deg):
+                    keep.append(seg)
+                    continue
+
+                q1 = (float(seg["x1"]), float(seg["y1"]))
+                q2 = (float(seg["x2"]), float(seg["y2"]))
+                if min(_dist2(p1, q1), _dist2(p1, q2), _dist2(p2, q1), _dist2(p2, q2)) > gap2:
+                    keep.append(seg)
+                    continue
+
+                line_pts.extend([q1, q2])
+                changed = True
+
+            if changed:
+                # Refit merged segment by farthest pair of collected endpoints.
+                best = (p1, p2)
+                best_d2 = _dist2(p1, p2)
+                for i in range(len(line_pts)):
+                    for j in range(i + 1, len(line_pts)):
+                        d2 = _dist2(line_pts[i], line_pts[j])
+                        if d2 > best_d2:
+                            best = (line_pts[i], line_pts[j])
+                            best_d2 = d2
+                base = {
+                    "x1": int(round(best[0][0])),
+                    "y1": int(round(best[0][1])),
+                    "x2": int(round(best[1][0])),
+                    "y2": int(round(best[1][1])),
+                }
+            remaining = keep
+
+        merged.append(base)
+
+    return merged
+
+
 def adaptive_hough_params(image_shape: tuple[int, int]) -> tuple[int, int, int]:
     """Compute scale-aware Hough parameters for small and large blueprints.
 

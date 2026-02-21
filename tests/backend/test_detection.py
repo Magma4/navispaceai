@@ -6,7 +6,12 @@ import cv2
 import numpy as np
 import pytest
 
-from backend.detection import detect_doors, detect_walls, extract_walls_from_mask
+from backend.detection import (
+    detect_doors,
+    detect_walls,
+    extract_walls_from_mask,
+    merge_collinear_wall_segments,
+)
 
 
 def test_detect_walls_finds_segments_on_simple_line() -> None:
@@ -57,3 +62,15 @@ def test_extract_walls_from_mask_returns_segments() -> None:
     walls = extract_walls_from_mask(mask)
     assert len(walls) >= 4
     assert {"x1", "y1", "x2", "y2"}.issubset(walls[0].keys())
+
+
+def test_merge_collinear_wall_segments_merges_fragments() -> None:
+    """Near-collinear contiguous fragments should collapse into fewer longer segments."""
+    walls = [
+        {"x1": 10, "y1": 10, "x2": 40, "y2": 10},
+        {"x1": 41, "y1": 10, "x2": 80, "y2": 11},
+        {"x1": 82, "y1": 11, "x2": 120, "y2": 11},
+    ]
+
+    merged = merge_collinear_wall_segments(walls, endpoint_gap_px=6.0)
+    assert len(merged) < len(walls)

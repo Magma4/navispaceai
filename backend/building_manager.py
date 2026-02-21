@@ -25,6 +25,7 @@ from backend.detection import (
     extract_walls_from_mask,
     filter_door_candidates,
     filter_wall_segments,
+    merge_collinear_wall_segments,
 )
 from backend.grid import walls_to_occupancy_grid
 from backend.preprocessing import preprocess_blueprint
@@ -196,6 +197,7 @@ class BuildingManager:
             min_support_ratio=0.1 if bool(pre.get("ml_used")) else 0.2,
             min_median_half_thickness_px=0.85 if bool(pre.get("ml_used")) else 1.2,
         )
+        walls = merge_collinear_wall_segments(walls)
         doors = detect_doors(
             pre["binary"],
             walls,
