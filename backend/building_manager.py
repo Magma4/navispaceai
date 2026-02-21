@@ -22,6 +22,7 @@ from backend.detection import (
     adaptive_hough_params,
     detect_doors,
     detect_walls,
+    extract_walls_from_mask,
     filter_door_candidates,
     filter_wall_segments,
 )
@@ -178,12 +179,14 @@ class BuildingManager:
 
         pre = preprocess_blueprint(image_bgr)
         hough_thr, hough_min_len, hough_gap = adaptive_hough_params(pre["gray"].shape)
-        walls = detect_walls(
+        hough_walls = detect_walls(
             pre["edges"],
             threshold=max(hough_thr, max(70, hough_threshold)),
             min_line_length=hough_min_len,
             max_line_gap=hough_gap,
         )
+        mask_walls = extract_walls_from_mask(pre["denoised"])
+        walls = [*hough_walls, *mask_walls]
         walls = filter_wall_segments(
             walls,
             pre["gray"].shape,

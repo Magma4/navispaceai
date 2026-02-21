@@ -6,7 +6,7 @@ import cv2
 import numpy as np
 import pytest
 
-from backend.detection import detect_doors, detect_walls
+from backend.detection import detect_doors, detect_walls, extract_walls_from_mask
 
 
 def test_detect_walls_finds_segments_on_simple_line() -> None:
@@ -47,3 +47,13 @@ def test_detect_doors_uses_ml_mask_when_available() -> None:
 
     doors = detect_doors(binary=binary, walls=[], door_mask=door_mask)
     assert len(doors) >= 1
+
+
+def test_extract_walls_from_mask_returns_segments() -> None:
+    """Contour vectorization should produce wall segments on a rectangular mask."""
+    mask = np.zeros((128, 128), dtype=np.uint8)
+    cv2.rectangle(mask, (20, 20), (108, 108), 255, 3)
+
+    walls = extract_walls_from_mask(mask)
+    assert len(walls) >= 4
+    assert {"x1", "y1", "x2", "y2"}.issubset(walls[0].keys())

@@ -73,6 +73,59 @@ def detect_walls(
     return segments
 
 
+def extract_walls_from_mask(
+    wall_mask: np.ndarray,
+    *,
+    min_contour_area: int = 120,
+    approx_eps_ratio: float = 0.01,
+) -> list[WallSegment]:
+    """Vectorize wall-like contours into line segments.
+
+    This complements Hough output for blueprint styles where long straight segments
+    are broken by symbols/text and Hough under-detects structure.
+    """
+    _validate_binary_image(wall_mask, "wall_mask")
+
+    binary = (wall_mask > 0).astype(np.uint8) * 255
+    contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    segments: list[WallSegment] = []
+    seen: set[tuple[int, int, int, int]] = set()
+
+    for contour in contours:
+        area = float(cv2.contourArea(contour))
+        if area < float(min_contour_area):
+            continue
+
+        peri = cv2.arcLength(contour, True)
+        if peri <= 1e-6:
+            continue
+
+        approx = cv2.approxPolyDP(contour, max(1.0, float(approx_eps_ratio) * peri), True)
+        pts = approx.reshape(-1, 2) if approx is not None else None
+        if pts is None or len(pts) < 2:
+            continue
+
+        for i in range(len(pts)):
+            x1, y1 = int(pts[i][0]), int(pts[i][1])
+            x2, y2 = int(pts[(i + 1) % len(pts)][0]), int(pts[(i + 1) % len(pts)][1])
+
+            if math.hypot(x2 - x1, y2 - y1) < 10:
+                continue
+
+            q = 3
+            ax, ay, bx, by = x1 // q, y1 // q, x2 // q, y2 // q
+            if (ax, ay, bx, by) > (bx, by, ax, ay):
+                ax, ay, bx, by = bx, by, ax, ay
+            key = (ax, ay, bx, by)
+            if key in seen:
+                continue
+            seen.add(key)
+            segments.append({"x1": x1, "y1": y1, "x2": x2, "y2": y2})
+
+    return segments
+
+
 def adaptive_hough_params(image_shape: tuple[int, int]) -> tuple[int, int, int]:
     """Compute scale-aware Hough parameters for small and large blueprints.
 

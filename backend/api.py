@@ -27,6 +27,7 @@ from backend.detection import (
     adaptive_hough_params,
     detect_doors,
     detect_walls,
+    extract_walls_from_mask,
     filter_door_candidates,
     filter_wall_segments,
 )
@@ -407,12 +408,14 @@ def create_app() -> FastAPI:
 
             pre = preprocess_blueprint(image)
             hough_threshold, hough_min_len, hough_max_gap = adaptive_hough_params(pre["gray"].shape)
-            walls = detect_walls(
+            hough_walls = detect_walls(
                 pre["edges"],
                 threshold=hough_threshold,
                 min_line_length=hough_min_len,
                 max_line_gap=hough_max_gap,
             )
+            mask_walls = extract_walls_from_mask(pre["denoised"])
+            walls = [*hough_walls, *mask_walls]
             walls = filter_wall_segments(
                 walls,
                 pre["gray"].shape,
@@ -616,12 +619,14 @@ def create_app() -> FastAPI:
                 # Build floor-specific GLB for stacked rendering in frontend.
                 pre = preprocess_blueprint(image)
                 hough_threshold, hough_min_len, hough_max_gap = adaptive_hough_params(pre["gray"].shape)
-                walls = detect_walls(
+                hough_walls = detect_walls(
                     pre["edges"],
                     threshold=hough_threshold,
                     min_line_length=hough_min_len,
                     max_line_gap=hough_max_gap,
                 )
+                mask_walls = extract_walls_from_mask(pre["denoised"])
+                walls = [*hough_walls, *mask_walls]
                 walls = filter_wall_segments(
                     walls,
                     pre["gray"].shape,
