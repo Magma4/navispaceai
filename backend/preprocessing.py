@@ -152,7 +152,7 @@ def _extract_wall_mask(gray: np.ndarray) -> np.ndarray:
         h = int(stats[label, cv2.CC_STAT_HEIGHT])
         if area < min_area:
             continue
-        if max(w, h) < 18:
+        if max(w, h) < 12:
             continue
         filtered[labels == label] = 255
 

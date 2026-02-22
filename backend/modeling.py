@@ -91,7 +91,7 @@ def _raster_wall_run_meshes(
     wall_thickness_m: float,
     min_run_px: int = 6,
 ) -> list[trimesh.Trimesh]:
-    """Create wall boxes from horizontal runs on a denoised binary wall mask."""
+    """Create wall boxes from horizontal and vertical runs on a denoised binary wall mask."""
     if wall_mask is None or wall_mask.size == 0 or wall_mask.ndim != 2:
         return []
 
@@ -106,6 +106,8 @@ def _raster_wall_run_meshes(
 
     meshes: list[trimesh.Trimesh] = []
     rows, cols = resized.shape
+
+    # Horizontal runs
     for r in range(rows):
         row = resized[r]
         c = 0
@@ -126,6 +128,30 @@ def _raster_wall_run_meshes(
             center_z = r * scale
 
             wall_mesh = trimesh.creation.box(extents=(length_m, wall_height_m, wall_thickness_m))
+            wall_mesh.apply_translation((center_x, wall_height_m / 2.0, center_z))
+            meshes.append(wall_mesh)
+
+    # Vertical runs
+    for c in range(cols):
+        col = resized[:, c]
+        r = 0
+        while r < rows:
+            if col[r] == 0:
+                r += 1
+                continue
+            start = r
+            while r < rows and col[r] > 0:
+                r += 1
+            end = r - 1
+            run_len = end - start + 1
+            if run_len < int(min_run_px):
+                continue
+
+            length_m = max(0.08, run_len * scale)
+            center_x = c * scale
+            center_z = ((start + end) * 0.5) * scale
+
+            wall_mesh = trimesh.creation.box(extents=(wall_thickness_m, wall_height_m, length_m))
             wall_mesh.apply_translation((center_x, wall_height_m / 2.0, center_z))
             meshes.append(wall_mesh)
 

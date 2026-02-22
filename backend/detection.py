@@ -88,7 +88,9 @@ def extract_walls_from_mask(
     _validate_binary_image(wall_mask, "wall_mask")
 
     binary = (wall_mask > 0).astype(np.uint8) * 255
-    contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    # Use RETR_LIST to include interior contours as well; external-only misses
+    # many interior room walls in dense plans.
+    contours, _ = cv2.findContours(binary, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
 
     segments: list[WallSegment] = []
     seen: set[tuple[int, int, int, int]] = set()
@@ -344,9 +346,9 @@ def filter_wall_segments(
     support_mask: np.ndarray | None = None,
     min_support_ratio: float = 0.1,
     min_median_half_thickness_px: float = 0.85,
-    connection_tolerance_px: float = 10.0,
-    keep_component_ratio: float = 0.18,
-    max_components: int = 2,
+    connection_tolerance_px: float = 14.0,
+    keep_component_ratio: float = 0.08,
+    max_components: int = 6,
 ) -> list[WallSegment]:
     """Filter noisy wall segments by length + dominant footprint bounds + dedup.
 
