@@ -209,6 +209,7 @@ class BuildingManager:
             pre["gray"].shape,
             primary_bbox=pre.get("primary_bbox"),
             bbox_margin_px=max(18, int(min(pre["gray"].shape) * 0.015)),
+            walls=walls,
         )
 
         cell_size_px = max(1, int(round(resolved_cell_m / self.model_scale_m_per_px)))

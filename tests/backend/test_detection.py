@@ -11,6 +11,7 @@ from backend.detection import (
     detect_staircases,
     detect_walls,
     extract_walls_from_mask,
+    filter_door_candidates,
     merge_collinear_wall_segments,
 )
 
@@ -87,3 +88,22 @@ def test_detect_staircases_from_parallel_runs() -> None:
     stairs = detect_staircases(binary)
     assert isinstance(stairs, list)
     assert len(stairs) >= 1
+
+
+def test_filter_door_candidates_prefers_near_wall_openings() -> None:
+    """Doors far from any wall segment should be filtered out."""
+    doors = [
+        {"x": 50, "y": 50, "w": 8, "h": 12},
+        {"x": 10, "y": 10, "w": 8, "h": 12},
+    ]
+    walls = [{"x1": 0, "y1": 14, "x2": 30, "y2": 14}]
+
+    kept = filter_door_candidates(
+        doors,
+        image_shape=(100, 100),
+        walls=walls,
+        max_wall_gap_px=10.0,
+    )
+
+    assert len(kept) == 1
+    assert kept[0]["x"] == 10

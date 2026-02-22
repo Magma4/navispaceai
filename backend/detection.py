@@ -505,18 +505,43 @@ def filter_door_candidates(
     *,
     primary_bbox: dict[str, int] | None = None,
     bbox_margin_px: int = 20,
+    walls: list[WallSegment] | None = None,
+    max_wall_gap_px: float = 14.0,
 ) -> list[DoorCandidate]:
-    """Filter door candidates to dominant footprint bounds."""
+    """Filter door candidates to footprint bounds and nearby wall context."""
     if not doors:
         return []
-    if not primary_bbox:
-        return doors
 
     height, width = int(image_shape[0]), int(image_shape[1])
-    x0 = max(0, int(primary_bbox.get("x", 0)) - bbox_margin_px)
-    y0 = max(0, int(primary_bbox.get("y", 0)) - bbox_margin_px)
-    x1 = min(width, int(primary_bbox.get("x", 0) + primary_bbox.get("w", width)) + bbox_margin_px)
-    y1 = min(height, int(primary_bbox.get("y", 0) + primary_bbox.get("h", height)) + bbox_margin_px)
+    if primary_bbox:
+        x0 = max(0, int(primary_bbox.get("x", 0)) - bbox_margin_px)
+        y0 = max(0, int(primary_bbox.get("y", 0)) - bbox_margin_px)
+        x1 = min(width, int(primary_bbox.get("x", 0) + primary_bbox.get("w", width)) + bbox_margin_px)
+        y1 = min(height, int(primary_bbox.get("y", 0) + primary_bbox.get("h", height)) + bbox_margin_px)
+    else:
+        x0, y0, x1, y1 = 0, 0, width, height
+
+    def _point_to_seg_dist(px: float, py: float, seg: WallSegment) -> float:
+        x1s = float(seg["x1"])
+        y1s = float(seg["y1"])
+        x2s = float(seg["x2"])
+        y2s = float(seg["y2"])
+        vx = x2s - x1s
+        vy = y2s - y1s
+        wx = px - x1s
+        wy = py - y1s
+        c1 = vx * wx + vy * wy
+        if c1 <= 0:
+            return math.hypot(px - x1s, py - y1s)
+        c2 = vx * vx + vy * vy
+        if c2 <= 1e-8:
+            return math.hypot(px - x1s, py - y1s)
+        if c1 >= c2:
+            return math.hypot(px - x2s, py - y2s)
+        t = c1 / c2
+        proj_x = x1s + t * vx
+        proj_y = y1s + t * vy
+        return math.hypot(px - proj_x, py - proj_y)
 
     out: list[DoorCandidate] = []
     for door in doors:
@@ -524,8 +549,15 @@ def filter_door_candidates(
             continue
         cx = int(door["x"] + max(1, door["w"]) / 2)
         cy = int(door["y"] + max(1, door["h"]) / 2)
-        if x0 <= cx <= x1 and y0 <= cy <= y1:
-            out.append({"x": int(door["x"]), "y": int(door["y"]), "w": int(door["w"]), "h": int(door["h"])})
+        if not (x0 <= cx <= x1 and y0 <= cy <= y1):
+            continue
+
+        if walls:
+            nearest = min(_point_to_seg_dist(float(cx), float(cy), seg) for seg in walls)
+            if nearest > float(max_wall_gap_px):
+                continue
+
+        out.append({"x": int(door["x"]), "y": int(door["y"]), "w": int(door["w"]), "h": int(door["h"])})
     return out
 
 

@@ -439,6 +439,7 @@ def create_app() -> FastAPI:
                 pre["gray"].shape,
                 primary_bbox=pre.get("primary_bbox"),
                 bbox_margin_px=max(18, int(min(pre["gray"].shape) * 0.015)),
+                walls=walls,
             )
             stairs = detect_staircases(pre["denoised"])
 
@@ -655,6 +656,7 @@ def create_app() -> FastAPI:
                     pre["gray"].shape,
                     primary_bbox=pre.get("primary_bbox"),
                     bbox_margin_px=max(18, int(min(pre["gray"].shape) * 0.015)),
+                    walls=walls,
                 )
                 stairs = detect_staircases(pre["denoised"])
 
