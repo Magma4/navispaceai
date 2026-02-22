@@ -169,8 +169,8 @@ def extrude_walls_to_scene(
     wall_mask: np.ndarray | None = None,
     floor_color_rgba: tuple[int, int, int, int] = (192, 203, 214, 255),
     wall_color_rgba: tuple[int, int, int, int] = (88, 95, 108, 255),
-    door_color_rgba: tuple[int, int, int, int] = (182, 132, 78, 255),
-    stair_color_rgba: tuple[int, int, int, int] = (120, 152, 188, 255),
+    door_color_rgba: tuple[int, int, int, int] = (230, 120, 40, 255),
+    stair_color_rgba: tuple[int, int, int, int] = (78, 170, 255, 255),
 ) -> trimesh.Scene:
     """Convert 2D wall line segments into a trimesh scene.
 
@@ -218,8 +218,25 @@ def extrude_walls_to_scene(
     _apply_face_color(floor, floor_color_rgba)
     scene.add_geometry(floor, geom_name="floor")
 
+    stair_rects = [s for s in (staircase_candidates or []) if {"x", "y", "w", "h"}.issubset(s.keys())]
+
+    wall_mask_for_mesh = wall_mask if wall_mask is not None else np.zeros(image_shape, dtype=np.uint8)
+    if stair_rects and wall_mask_for_mesh.size > 0:
+        wall_mask_for_mesh = wall_mask_for_mesh.copy()
+        for stair in stair_rects:
+            sx = int(stair["x"])
+            sy = int(stair["y"])
+            sw = max(1, int(stair["w"]))
+            sh = max(1, int(stair["h"]))
+            pad = 3
+            x0 = max(0, sx - pad)
+            y0 = max(0, sy - pad)
+            x1 = min(wall_mask_for_mesh.shape[1], sx + sw + pad)
+            y1 = min(wall_mask_for_mesh.shape[0], sy + sh + pad)
+            wall_mask_for_mesh[y0:y1, x0:x1] = 0
+
     raster_meshes = _raster_wall_run_meshes(
-        wall_mask if wall_mask is not None else np.zeros(image_shape, dtype=np.uint8),
+        wall_mask_for_mesh,
         model_scale_m_per_px=model_scale_m_per_px,
         wall_height_m=wall_height_m,
         wall_thickness_m=wall_thickness_m,
@@ -227,6 +244,20 @@ def extrude_walls_to_scene(
     for idx, wall_mesh in enumerate(raster_meshes):
         _apply_face_color(wall_mesh, wall_color_rgba)
         scene.add_geometry(wall_mesh, geom_name=f"wall_raster_{idx}")
+
+    def _segment_midpoint_in_stairs(seg: WallSegment) -> bool:
+        if not stair_rects:
+            return False
+        mx = 0.5 * (float(seg["x1"]) + float(seg["x2"]))
+        my = 0.5 * (float(seg["y1"]) + float(seg["y2"]))
+        for stair in stair_rects:
+            sx = float(stair["x"])
+            sy = float(stair["y"])
+            sw = max(1.0, float(stair["w"]))
+            sh = max(1.0, float(stair["h"]))
+            if sx <= mx <= sx + sw and sy <= my <= sy + sh:
+                return True
+        return False
 
     # Keep vector walls too; they add directional fidelity on top of raster runs.
     for idx, seg in enumerate(walls):
@@ -237,6 +268,8 @@ def extrude_walls_to_scene(
 
         length, angle = _segment_length_and_angle(x1, z1, x2, z2)
         if length <= 0.18:
+            continue
+        if _segment_midpoint_in_stairs(seg):
             continue
 
         wall_mesh = trimesh.creation.box(extents=(length, wall_height_m, wall_thickness_m))

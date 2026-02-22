@@ -127,6 +127,34 @@ export class NavScene {
 
     const gltf = await loader.loadAsync(modelUrl);
     this.modelRoot = gltf.scene;
+
+    // Enforce semantic coloring by mesh name so walls/doors/stairs are visually distinct.
+    this.modelRoot.traverse((obj) => {
+      if (!obj.isMesh || !obj.material) return;
+      const name = String(obj.name || "").toLowerCase();
+
+      let color = null;
+      if (name.startsWith("door_")) color = "#e67828";
+      else if (name.startsWith("stair_")) color = "#4eaaff";
+      else if (name.startsWith("wall_")) color = "#5c6d82";
+      else if (name === "floor") color = "#c0cbd6";
+
+      if (color) {
+        const base = new THREE.MeshStandardMaterial({
+          color,
+          roughness: 0.55,
+          metalness: 0.05,
+        });
+        if (name.startsWith("door_") || name.startsWith("stair_")) {
+          base.emissive = new THREE.Color(color);
+          base.emissiveIntensity = 0.12;
+        }
+        if (Array.isArray(obj.material)) obj.material.forEach((m) => m.dispose());
+        else obj.material.dispose();
+        obj.material = base;
+      }
+    });
+
     this.scene.add(this.modelRoot);
   }
 
