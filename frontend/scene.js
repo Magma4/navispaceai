@@ -133,26 +133,54 @@ export class NavScene {
       if (!obj.isMesh || !obj.material) return;
       const name = String(obj.name || "").toLowerCase();
 
-      let color = null;
-      if (name.startsWith("door_")) color = "#e67828";
-      else if (name.startsWith("stair_")) color = "#4eaaff";
-      else if (name.startsWith("wall_")) color = "#5c6d82";
-      else if (name === "floor") color = "#c0cbd6";
+      // Name-first semantic mapping from backend geom names.
+      let kind = null;
+      if (name.startsWith("door_")) kind = "door";
+      else if (name.startsWith("stair_")) kind = "stair";
+      else if (name.startsWith("wall_")) kind = "wall";
+      else if (name === "floor") kind = "floor";
 
-      if (color) {
-        const base = new THREE.MeshStandardMaterial({
-          color,
-          roughness: 0.55,
-          metalness: 0.05,
-        });
-        if (name.startsWith("door_") || name.startsWith("stair_")) {
-          base.emissive = new THREE.Color(color);
-          base.emissiveIntensity = 0.12;
+      // Fallback classification for GLB exporters/loaders that drop geom names.
+      if (!kind) {
+        obj.geometry.computeBoundingBox();
+        const bb = obj.geometry.boundingBox;
+        if (bb) {
+          const sx = Math.abs(bb.max.x - bb.min.x);
+          const sy = Math.abs(bb.max.y - bb.min.y);
+          const sz = Math.abs(bb.max.z - bb.min.z);
+          const longSide = Math.max(sx, sz);
+          const shortSide = Math.min(sx, sz);
+
+          if (sy < 0.12 && longSide > 2.0) kind = "floor";
+          else if (sy > 1.8 && sy < 2.4 && shortSide < 0.14 && longSide >= 0.35 && longSide <= 1.4) kind = "door";
+          else if (sy <= 1.9 && shortSide >= 0.14 && shortSide <= 1.2 && longSide >= 0.25 && longSide <= 2.5) kind = "stair";
+          else kind = "wall";
         }
-        if (Array.isArray(obj.material)) obj.material.forEach((m) => m.dispose());
-        else obj.material.dispose();
-        obj.material = base;
       }
+
+      const palette = {
+        floor: "#c0cbd6",
+        wall: "#5c6d82",
+        door: "#ff7a1a",
+        stair: "#2da4ff",
+      };
+
+      const color = palette[kind || "wall"];
+      const base = new THREE.MeshStandardMaterial({
+        color,
+        roughness: 0.55,
+        metalness: 0.05,
+        transparent: kind === "door",
+        opacity: kind === "door" ? 0.92 : 1.0,
+      });
+      if (kind === "door" || kind === "stair") {
+        base.emissive = new THREE.Color(color);
+        base.emissiveIntensity = kind === "door" ? 0.22 : 0.12;
+      }
+
+      if (Array.isArray(obj.material)) obj.material.forEach((m) => m.dispose());
+      else obj.material.dispose();
+      obj.material = base;
     });
 
     this.scene.add(this.modelRoot);
