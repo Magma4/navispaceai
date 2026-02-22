@@ -8,6 +8,7 @@ import pytest
 
 from backend.detection import (
     detect_doors,
+    detect_staircases,
     detect_walls,
     extract_walls_from_mask,
     merge_collinear_wall_segments,
@@ -74,3 +75,15 @@ def test_merge_collinear_wall_segments_merges_fragments() -> None:
 
     merged = merge_collinear_wall_segments(walls, endpoint_gap_px=6.0)
     assert len(merged) < len(walls)
+
+
+def test_detect_staircases_from_parallel_runs() -> None:
+    """Repeated parallel treads should yield staircase candidates."""
+    binary = np.zeros((128, 128), dtype=np.uint8)
+    cv2.rectangle(binary, (20, 20), (105, 95), 255, 1)
+    for y in range(24, 92, 10):
+        cv2.line(binary, (24, y), (101, y), 255, 2)
+
+    stairs = detect_staircases(binary)
+    assert isinstance(stairs, list)
+    assert len(stairs) >= 1

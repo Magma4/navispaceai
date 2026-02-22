@@ -33,6 +33,26 @@ def test_walls_to_occupancy_grid_invalid_cell_size_raises() -> None:
         walls_to_occupancy_grid((40, 40), walls=[], cell_size_px=0)
 
 
+def test_walls_to_occupancy_grid_hole_fill_reduces_internal_voids() -> None:
+    """Tiny enclosed holes should be filled during wall cleanup."""
+    walls = [
+        {"x1": 8, "y1": 8, "x2": 32, "y2": 8},
+        {"x1": 32, "y1": 8, "x2": 32, "y2": 32},
+        {"x1": 32, "y1": 32, "x2": 8, "y2": 32},
+        {"x1": 8, "y1": 32, "x2": 8, "y2": 8},
+    ]
+
+    _, inflated = walls_to_occupancy_grid(
+        (40, 40),
+        walls=walls,
+        wall_thickness_px=1,
+        inflation_radius_px=0,
+        fill_hole_max_area_px=1000,
+    )
+
+    assert inflated[20, 20] > 0
+
+
 def test_export_grid_json_writes_expected_payload(tmp_path: Path) -> None:
     """Grid export should serialize metadata and occupancy values."""
     grid = np.zeros((3, 4), dtype=np.uint8)

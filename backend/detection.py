@@ -17,6 +17,7 @@ import numpy as np
 
 WallSegment = dict[str, int]
 DoorCandidate = dict[str, int]
+StairCandidate = dict[str, int]
 
 
 def _validate_binary_image(image: np.ndarray, name: str) -> None:
@@ -131,10 +132,17 @@ def merge_collinear_wall_segments(
     *,
     angle_tolerance_deg: float = 8.0,
     endpoint_gap_px: float = 18.0,
+    parallel_offset_px: float = 12.0,
+    interval_gap_px: float = 25.0,
+    min_wall_length_px: float = 35.0,
 ) -> list[WallSegment]:
-    """Merge near-collinear wall segments with close endpoints.
+    """Merge near-collinear wall segments into longer linked wall runs.
 
-    Reduces fragmented stick-like geometry in exported 3D meshes.
+    Heuristics:
+    - Orientation compatibility (angle tolerance)
+    - Near-coplanar offset (distance from candidate endpoints to base infinite line)
+    - Endpoint proximity or projected interval continuity (small gaps)
+    - Final pruning of tiny residual segments
     """
     if not walls:
         return []
@@ -154,21 +162,45 @@ def merge_collinear_wall_segments(
         dy = a[1] - b[1]
         return dx * dx + dy * dy
 
-    remaining = [dict(seg) for seg in walls]
+    def _segment_len(seg: WallSegment) -> float:
+        return math.hypot(float(seg["x2"] - seg["x1"]), float(seg["y2"] - seg["y1"]))
+
+    def _line_offset(px: float, py: float, x1: float, y1: float, ux: float, uy: float) -> float:
+        # Distance from point P to line passing through A in direction U.
+        vx = px - x1
+        vy = py - y1
+        return abs(vx * uy - vy * ux)
+
+    def _project_t(px: float, py: float, x1: float, y1: float, ux: float, uy: float) -> float:
+        return (px - x1) * ux + (py - y1) * uy
+
+    remaining = [dict(seg) for seg in walls if _segment_len(seg) >= max(2.0, float(min_wall_length_px) * 0.35)]
     merged: list[WallSegment] = []
     gap2 = float(endpoint_gap_px) * float(endpoint_gap_px)
 
     while remaining:
         base = remaining.pop()
         changed = True
+
         while changed:
             changed = False
-            a0 = _norm(_angle(base))
             p1 = (float(base["x1"]), float(base["y1"]))
             p2 = (float(base["x2"]), float(base["y2"]))
-            line_pts = [p1, p2]
+            a0 = _norm(_angle(base))
 
+            dx = p2[0] - p1[0]
+            dy = p2[1] - p1[1]
+            ln = math.hypot(dx, dy)
+            if ln <= 1e-6:
+                break
+            ux, uy = dx / ln, dy / ln
+
+            base_t0 = 0.0
+            base_t1 = ln
+
+            line_pts = [p1, p2]
             keep: list[WallSegment] = []
+
             for seg in remaining:
                 a1 = _norm(_angle(seg))
                 if abs(a0 - a1) > float(angle_tolerance_deg):
@@ -177,7 +209,30 @@ def merge_collinear_wall_segments(
 
                 q1 = (float(seg["x1"]), float(seg["y1"]))
                 q2 = (float(seg["x2"]), float(seg["y2"]))
-                if min(_dist2(p1, q1), _dist2(p1, q2), _dist2(p2, q1), _dist2(p2, q2)) > gap2:
+
+                # Condition A: direct endpoint proximity.
+                close_endpoints = (
+                    min(_dist2(p1, q1), _dist2(p1, q2), _dist2(p2, q1), _dist2(p2, q2)) <= gap2
+                )
+
+                # Condition B: near-coplanar + short projected gap.
+                off1 = _line_offset(q1[0], q1[1], p1[0], p1[1], ux, uy)
+                off2 = _line_offset(q2[0], q2[1], p1[0], p1[1], ux, uy)
+                near_parallel_line = max(off1, off2) <= float(parallel_offset_px)
+
+                tq1 = _project_t(q1[0], q1[1], p1[0], p1[1], ux, uy)
+                tq2 = _project_t(q2[0], q2[1], p1[0], p1[1], ux, uy)
+                seg_t0 = min(tq1, tq2)
+                seg_t1 = max(tq1, tq2)
+
+                if seg_t1 < base_t0:
+                    interval_gap = base_t0 - seg_t1
+                elif seg_t0 > base_t1:
+                    interval_gap = seg_t0 - base_t1
+                else:
+                    interval_gap = 0.0
+
+                if not close_endpoints and not (near_parallel_line and interval_gap <= float(interval_gap_px)):
                     keep.append(seg)
                     continue
 
@@ -200,9 +255,11 @@ def merge_collinear_wall_segments(
                     "x2": int(round(best[1][0])),
                     "y2": int(round(best[1][1])),
                 }
+
             remaining = keep
 
-        merged.append(base)
+        if _segment_len(base) >= float(min_wall_length_px):
+            merged.append(base)
 
     return merged
 
@@ -524,5 +581,68 @@ def detect_doors(
         # Door-sized rectangular gaps in blueprint pixel space (heuristic window).
         if 80 <= area <= 2000 and 5 <= min(w, h) <= 25 and max(w, h) <= 80:
             candidates.append({"x": int(x), "y": int(y), "w": int(w), "h": int(h)})
+
+    return candidates
+
+
+def detect_staircases(
+    binary: np.ndarray,
+    *,
+    min_area: int = 180,
+    max_area: int = 20000,
+    min_steps: int = 3,
+) -> list[StairCandidate]:
+    """Detect staircase-like regions from repeated parallel line patterns.
+
+    The detector is intentionally conservative and returns coarse stair bboxes.
+    """
+    _validate_binary_image(binary, "binary")
+
+    # Ensure foreground strokes are white for contour/line extraction.
+    fg = (binary > 0).astype(np.uint8) * 255
+    contours, _ = cv2.findContours(fg, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    candidates: list[StairCandidate] = []
+    for contour in contours:
+        x, y, w, h = cv2.boundingRect(contour)
+        area = int(w * h)
+        if area < int(min_area) or area > int(max_area):
+            continue
+
+        aspect = max(w, h) / max(1.0, min(w, h))
+        if aspect < 1.08:
+            continue
+
+        roi = fg[y : y + h, x : x + w]
+        if roi.size == 0:
+            continue
+
+        roi_edges = cv2.Canny(roi, 40, 120)
+        lines = cv2.HoughLinesP(
+            roi_edges,
+            rho=1,
+            theta=np.pi / 180,
+            threshold=max(10, int(min(w, h) * 0.12)),
+            minLineLength=max(6, int(min(w, h) * 0.2)),
+            maxLineGap=3,
+        )
+        if lines is None or len(lines) < int(min_steps):
+            continue
+
+        horizontal = 0
+        vertical = 0
+        for line in lines:
+            x1, y1, x2, y2 = line[0]
+            ang = abs(math.degrees(math.atan2(float(y2 - y1), float(x2 - x1))))
+            if ang <= 15 or ang >= 165:
+                horizontal += 1
+            if 75 <= ang <= 105:
+                vertical += 1
+
+        # Stair signatures usually have repeated near-parallel treads and some riser edges.
+        if max(horizontal, vertical) < int(min_steps):
+            continue
+
+        candidates.append({"x": int(x), "y": int(y), "w": int(w), "h": int(h)})
 
     return candidates

@@ -26,6 +26,7 @@ from backend.building_manager import BuildingManager, RoomMeta
 from backend.detection import (
     adaptive_hough_params,
     detect_doors,
+    detect_staircases,
     detect_walls,
     extract_walls_from_mask,
     filter_door_candidates,
@@ -439,6 +440,7 @@ def create_app() -> FastAPI:
                 primary_bbox=pre.get("primary_bbox"),
                 bbox_margin_px=max(18, int(min(pre["gray"].shape) * 0.015)),
             )
+            stairs = detect_staircases(pre["denoised"])
 
             grid, _ = walls_to_occupancy_grid(
                 image_shape=pre["gray"].shape,
@@ -467,6 +469,7 @@ def create_app() -> FastAPI:
                 wall_height_m=3.0,
                 model_scale_m_per_px=MODEL_SCALE_M_PER_PX,
                 door_candidates=doors,
+                staircase_candidates=stairs,
                 wall_mask=pre.get("denoised"),
             )
 
@@ -485,6 +488,7 @@ def create_app() -> FastAPI:
                 "message": "Blueprint processed successfully",
                 "walls": walls,
                 "doors": doors,
+                "stairs": stairs,
                 "grid": json_grid(grid),
                 "grid_shape": {"rows": rows, "cols": cols},
                 "cell_size_m": STATE.cell_size_m,
@@ -652,10 +656,12 @@ def create_app() -> FastAPI:
                     primary_bbox=pre.get("primary_bbox"),
                     bbox_margin_px=max(18, int(min(pre["gray"].shape) * 0.015)),
                 )
+                stairs = detect_staircases(pre["denoised"])
 
                 floor_artifacts[int(floor_number)] = {
                     "walls": walls,
                     "doors": doors,
+                    "stairs": stairs,
                 }
 
                 model_filename = f"model_{_safe_stem(building_id)}_f{floor_number}_{ts}_{idx}.glb"
@@ -667,6 +673,7 @@ def create_app() -> FastAPI:
                     wall_height_m=3.0,
                     model_scale_m_per_px=MODEL_SCALE_M_PER_PX,
                     door_candidates=doors,
+                    staircase_candidates=stairs,
                     wall_mask=pre.get("denoised"),
                 )
                 floor_meta.model_url = f"/generated/models/{model_filename}"

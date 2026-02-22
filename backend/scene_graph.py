@@ -7,6 +7,7 @@ from typing import Any
 
 WallSegment = dict[str, int]
 DoorCandidate = dict[str, int]
+StairCandidate = dict[str, int]
 
 
 def _segment_to_world(seg: WallSegment, scale_m_per_px: float) -> dict[str, float]:
@@ -18,11 +19,11 @@ def _segment_to_world(seg: WallSegment, scale_m_per_px: float) -> dict[str, floa
     }
 
 
-def _door_to_world(door: DoorCandidate, scale_m_per_px: float) -> dict[str, float]:
-    x = float(door.get("x", 0))
-    y = float(door.get("y", 0))
-    w = max(0.0, float(door.get("w", 0)))
-    h = max(0.0, float(door.get("h", 0)))
+def _rect_to_world(rect: dict[str, int], scale_m_per_px: float) -> dict[str, float]:
+    x = float(rect.get("x", 0))
+    y = float(rect.get("y", 0))
+    w = max(0.0, float(rect.get("w", 0)))
+    h = max(0.0, float(rect.get("h", 0)))
     return {
         "x": x * scale_m_per_px,
         "z": y * scale_m_per_px,
@@ -62,6 +63,7 @@ def build_scene_graph(
         artifacts = floor_artifacts.get(floor_num, {})
         walls_px: list[WallSegment] = list(artifacts.get("walls", []))
         doors_px: list[DoorCandidate] = list(artifacts.get("doors", []))
+        stairs_px: list[StairCandidate] = list(artifacts.get("stairs", []))
 
         walls = [
             {
@@ -77,10 +79,22 @@ def build_scene_graph(
                 "id": f"F{floor_num}-O{idx:04d}",
                 "type": "door",
                 "floor": floor_num,
-                "pose_m": _door_to_world(door, model_scale_m_per_px),
+                "pose_m": _rect_to_world(door, model_scale_m_per_px),
             }
             for idx, door in enumerate(doors_px, start=1)
         ]
+
+        openings.extend(
+            [
+                {
+                    "id": f"F{floor_num}-S{idx:04d}",
+                    "type": "staircase",
+                    "floor": floor_num,
+                    "pose_m": _rect_to_world(stair, model_scale_m_per_px),
+                }
+                for idx, stair in enumerate(stairs_px, start=1)
+            ]
+        )
 
         levels.append(
             {

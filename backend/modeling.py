@@ -20,6 +20,7 @@ import trimesh
 
 WallSegment = dict[str, int]
 DoorCandidate = dict[str, int]
+StairCandidate = dict[str, int]
 
 
 def _validate_modeling_inputs(
@@ -138,10 +139,12 @@ def extrude_walls_to_scene(
     wall_height_m: float = 3.0,
     wall_thickness_m: float = 0.15,
     door_candidates: list[DoorCandidate] | None = None,
+    staircase_candidates: list[StairCandidate] | None = None,
     wall_mask: np.ndarray | None = None,
     floor_color_rgba: tuple[int, int, int, int] = (192, 203, 214, 255),
     wall_color_rgba: tuple[int, int, int, int] = (88, 95, 108, 255),
     door_color_rgba: tuple[int, int, int, int] = (182, 132, 78, 255),
+    stair_color_rgba: tuple[int, int, int, int] = (120, 152, 188, 255),
 ) -> trimesh.Scene:
     """Convert 2D wall line segments into a trimesh scene.
 
@@ -152,6 +155,7 @@ def extrude_walls_to_scene(
         wall_height_m: Wall extrusion height in meters.
         wall_thickness_m: Wall thickness in meters.
         door_candidates: Optional door bounding boxes (`x`, `y`, `w`, `h`) in source pixels.
+        staircase_candidates: Optional staircase bounding boxes (`x`, `y`, `w`, `h`) in source pixels.
         floor_color_rgba: Floor mesh color.
         wall_color_rgba: Wall mesh color.
         door_color_rgba: Door mesh color.
@@ -250,6 +254,30 @@ def extrude_walls_to_scene(
         _apply_face_color(door_mesh, door_color_rgba)
         scene.add_geometry(door_mesh, geom_name=f"door_{idx}")
 
+    # Add staircase slabs for visual and semantic debugging.
+    for idx, stair in enumerate(staircase_candidates or []):
+        if not {"x", "y", "w", "h"}.issubset(stair.keys()):
+            continue
+
+        stair_w_px = max(1.0, float(stair["w"]))
+        stair_h_px = max(1.0, float(stair["h"]))
+        center_x_px = float(stair["x"]) + stair_w_px / 2.0
+        center_z_px = float(stair["y"]) + stair_h_px / 2.0
+
+        center_x = center_x_px * model_scale_m_per_px
+        center_z = center_z_px * model_scale_m_per_px
+        run_m = max(0.6, max(stair_w_px, stair_h_px) * model_scale_m_per_px)
+        width_m = max(0.6, min(stair_w_px, stair_h_px) * model_scale_m_per_px)
+        stair_h_m = min(1.8, max(0.45, wall_height_m * 0.45))
+
+        stair_mesh = trimesh.creation.box(extents=(run_m, stair_h_m, width_m))
+        yaw = 0.0 if stair_w_px >= stair_h_px else math.pi / 2.0
+        rotation = trimesh.transformations.rotation_matrix(yaw, [0, 1, 0])
+        translation = trimesh.transformations.translation_matrix([center_x, stair_h_m / 2.0, center_z])
+        stair_mesh.apply_transform(np.dot(translation, rotation))
+        _apply_face_color(stair_mesh, stair_color_rgba)
+        scene.add_geometry(stair_mesh, geom_name=f"stair_{idx}")
+
     return scene
 
 
@@ -285,6 +313,7 @@ def build_model_from_walls(
     wall_height_m: float = 3.0,
     model_scale_m_per_px: float = 0.05,
     door_candidates: list[DoorCandidate] | None = None,
+    staircase_candidates: list[StairCandidate] | None = None,
     wall_mask: np.ndarray | None = None,
 ) -> str:
     """High-level helper to construct and export a 3D model from wall segments.
@@ -306,6 +335,7 @@ def build_model_from_walls(
         model_scale_m_per_px=model_scale_m_per_px,
         wall_height_m=wall_height_m,
         door_candidates=door_candidates,
+        staircase_candidates=staircase_candidates,
         wall_mask=wall_mask,
     )
     return export_scene_glb(scene, output_path)

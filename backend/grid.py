@@ -47,6 +47,8 @@ def walls_to_occupancy_grid(
     inflation_radius_px: int = 3,
     door_candidates: list[DoorCandidate] | None = None,
     door_clearance_px: int = 3,
+    close_kernel_px: int = 3,
+    fill_hole_max_area_px: int = 400,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Rasterize walls and build an inflated occupancy grid.
 
@@ -76,6 +78,10 @@ def walls_to_occupancy_grid(
         raise ValueError("inflation_radius_px must be >= 0")
     if door_clearance_px < 0:
         raise ValueError("door_clearance_px must be >= 0")
+    if close_kernel_px < 1:
+        raise ValueError("close_kernel_px must be >= 1")
+    if fill_hole_max_area_px < 0:
+        raise ValueError("fill_hole_max_area_px must be >= 0")
 
     wall_mask = np.zeros((height, width), dtype=np.uint8)
 
@@ -88,6 +94,24 @@ def walls_to_occupancy_grid(
             color=255,
             thickness=wall_thickness_px,
         )
+
+    # Wall linking / hole reduction pass before inflation.
+    close_k = max(1, int(close_kernel_px))
+    close_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (close_k, close_k))
+    wall_mask = cv2.morphologyEx(wall_mask, cv2.MORPH_CLOSE, close_kernel, iterations=1)
+
+    # Fill tiny enclosed voids inside wall blobs while preserving larger openings.
+    if int(fill_hole_max_area_px) > 0:
+        inv = cv2.bitwise_not(wall_mask)
+        contours, hierarchy = cv2.findContours(inv, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
+        if hierarchy is not None:
+            for idx, contour in enumerate(contours):
+                parent = int(hierarchy[0][idx][3])
+                if parent < 0:
+                    continue
+                area = float(cv2.contourArea(contour))
+                if area <= float(fill_hole_max_area_px):
+                    cv2.drawContours(wall_mask, [contour], -1, color=255, thickness=-1)
 
     kernel_size = max(1, inflation_radius_px * 2 + 1)
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
