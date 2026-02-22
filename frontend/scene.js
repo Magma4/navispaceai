@@ -140,23 +140,10 @@ export class NavScene {
       else if (name.startsWith("wall_")) kind = "wall";
       else if (name === "floor") kind = "floor";
 
-      // Fallback classification for GLB exporters/loaders that drop geom names.
-      if (!kind) {
-        obj.geometry.computeBoundingBox();
-        const bb = obj.geometry.boundingBox;
-        if (bb) {
-          const sx = Math.abs(bb.max.x - bb.min.x);
-          const sy = Math.abs(bb.max.y - bb.min.y);
-          const sz = Math.abs(bb.max.z - bb.min.z);
-          const longSide = Math.max(sx, sz);
-          const shortSide = Math.min(sx, sz);
-
-          if (sy < 0.12 && longSide > 2.0) kind = "floor";
-          else if (sy > 1.8 && sy < 2.4 && shortSide < 0.14 && longSide >= 0.35 && longSide <= 1.4) kind = "door";
-          else if (sy <= 1.9 && shortSide >= 0.14 && shortSide <= 1.2 && longSide >= 0.25 && longSide <= 2.5) kind = "stair";
-          else kind = "wall";
-        }
-      }
+      // IMPORTANT: if kind is unknown, keep GLB material as-is.
+      // Backend already writes semantic colors; forcing a fallback guess was
+      // washing doors/stairs back to wall tone in practice.
+      if (!kind) return;
 
       const palette = {
         floor: "#c0cbd6",
@@ -165,17 +152,17 @@ export class NavScene {
         stair: "#2da4ff",
       };
 
-      const color = palette[kind || "wall"];
+      const color = palette[kind];
       const base = new THREE.MeshStandardMaterial({
         color,
         roughness: 0.55,
         metalness: 0.05,
         transparent: kind === "door",
-        opacity: kind === "door" ? 0.92 : 1.0,
+        opacity: kind === "door" ? 0.95 : 1.0,
       });
       if (kind === "door" || kind === "stair") {
         base.emissive = new THREE.Color(color);
-        base.emissiveIntensity = kind === "door" ? 0.22 : 0.12;
+        base.emissiveIntensity = kind === "door" ? 0.28 : 0.16;
       }
 
       if (Array.isArray(obj.material)) obj.material.forEach((m) => m.dispose());
