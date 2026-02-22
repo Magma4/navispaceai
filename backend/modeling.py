@@ -298,18 +298,18 @@ def extrude_walls_to_scene(
         center_x = center_x_px * model_scale_m_per_px
         center_z = center_z_px * model_scale_m_per_px
 
-        clear_width_m = max(0.8, min(1.25, max(door_w_px, door_h_px) * model_scale_m_per_px))
-        leaf_width_m = clear_width_m * 0.48
-        door_height_m = min(2.2, max(1.95, wall_height_m * 0.72))
-        door_thickness_m = min(0.06, wall_thickness_m * 0.45)
+        clear_width_m = max(0.82, min(1.15, max(door_w_px, door_h_px) * model_scale_m_per_px))
+        leaf_width_m = clear_width_m * 0.9
+        door_height_m = min(2.15, max(1.98, wall_height_m * 0.74))
+        door_thickness_m = min(0.05, wall_thickness_m * 0.35)
 
         # Orient along longer axis of detected door bbox and rotate leaf open.
         base_yaw = 0.0 if door_w_px >= door_h_px else math.pi / 2.0
-        open_yaw = math.radians(28.0)
+        open_yaw = math.radians(52.0)
 
         # Hinge offset from opening center so the leaf appears to swing.
-        hx = center_x - (clear_width_m * 0.25) * math.cos(base_yaw)
-        hz = center_z - (clear_width_m * 0.25) * math.sin(base_yaw)
+        hx = center_x - (clear_width_m * 0.45) * math.cos(base_yaw)
+        hz = center_z - (clear_width_m * 0.45) * math.sin(base_yaw)
 
         door_leaf = trimesh.creation.box(extents=(leaf_width_m, door_height_m, door_thickness_m))
         rot_base = trimesh.transformations.rotation_matrix(base_yaw + open_yaw, [0, 1, 0])

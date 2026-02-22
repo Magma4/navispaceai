@@ -547,7 +547,7 @@ def filter_door_candidates(
     bbox_margin_px: int = 20,
     walls: list[WallSegment] | None = None,
     staircase_candidates: list[StairCandidate] | None = None,
-    max_wall_gap_px: float = 14.0,
+    max_wall_gap_px: float = 20.0,
     max_stair_overlap_ratio: float = 0.3,
 ) -> list[DoorCandidate]:
     """Filter door candidates to footprint bounds + wall context, excluding stair artifacts."""
@@ -659,7 +659,7 @@ def detect_doors(
             area = w * h
 
             # Keep compact elongated regions typically corresponding to swing/openings.
-            if 40 <= area <= 4000 and 4 <= min(w, h) <= 40 and max(w, h) <= 120:
+            if 32 <= area <= 5200 and 4 <= min(w, h) <= 48 and max(w, h) <= 140:
                 ml_candidates.append({"x": int(x), "y": int(y), "w": int(w), "h": int(h)})
 
         if ml_candidates:
@@ -676,7 +676,7 @@ def detect_doors(
         area = w * h
 
         # Door-sized rectangular gaps in blueprint pixel space (heuristic window).
-        if 80 <= area <= 2000 and 5 <= min(w, h) <= 25 and max(w, h) <= 80:
+        if 60 <= area <= 3200 and 5 <= min(w, h) <= 30 and max(w, h) <= 110:
             candidates.append({"x": int(x), "y": int(y), "w": int(w), "h": int(h)})
 
     return _dedupe_rect_candidates(candidates, iou_threshold=0.4)
@@ -686,60 +686,118 @@ def detect_staircases(
     binary: np.ndarray,
     *,
     min_area: int = 180,
-    max_area: int = 20000,
-    min_steps: int = 3,
+    max_area: int = 30000,
+    min_steps: int = 4,
 ) -> list[StairCandidate]:
-    """Detect staircase-like regions from repeated parallel line patterns.
-
-    The detector is intentionally conservative and returns coarse stair bboxes.
-    """
+    """Detect staircase-like regions from repeated parallel tread patterns."""
     _validate_binary_image(binary, "binary")
 
-    # Ensure foreground strokes are white for contour/line extraction.
     fg = (binary > 0).astype(np.uint8) * 255
-    contours, _ = cv2.findContours(fg, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    edges = cv2.Canny(fg, 35, 120)
+
+    # Component proposals are more reliable than external contours on fully connected plans.
+    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats((edges > 0).astype(np.uint8), connectivity=8)
 
     candidates: list[StairCandidate] = []
-    for contour in contours:
-        x, y, w, h = cv2.boundingRect(contour)
+    for label in range(1, num_labels):
+        x = int(stats[label, cv2.CC_STAT_LEFT])
+        y = int(stats[label, cv2.CC_STAT_TOP])
+        w = int(stats[label, cv2.CC_STAT_WIDTH])
+        h = int(stats[label, cv2.CC_STAT_HEIGHT])
         area = int(w * h)
         if area < int(min_area) or area > int(max_area):
             continue
 
         aspect = max(w, h) / max(1.0, min(w, h))
-        if aspect < 1.08:
+        if aspect < 1.15:
             continue
 
         roi = fg[y : y + h, x : x + w]
         if roi.size == 0:
             continue
+        roi_edges = cv2.Canny(roi, 35, 120)
 
-        roi_edges = cv2.Canny(roi, 40, 120)
         lines = cv2.HoughLinesP(
             roi_edges,
             rho=1,
             theta=np.pi / 180,
-            threshold=max(10, int(min(w, h) * 0.12)),
-            minLineLength=max(6, int(min(w, h) * 0.2)),
+            threshold=max(12, int(min(w, h) * 0.14)),
+            minLineLength=max(8, int(min(w, h) * 0.24)),
             maxLineGap=3,
         )
         if lines is None or len(lines) < int(min_steps):
             continue
 
-        horizontal = 0
-        vertical = 0
+        horiz_pos: list[float] = []
+        vert_pos: list[float] = []
         for line in lines:
             x1, y1, x2, y2 = line[0]
             ang = abs(math.degrees(math.atan2(float(y2 - y1), float(x2 - x1))))
             if ang <= 15 or ang >= 165:
-                horizontal += 1
-            if 75 <= ang <= 105:
-                vertical += 1
+                horiz_pos.append(0.5 * (float(y1) + float(y2)))
+            elif 75 <= ang <= 105:
+                vert_pos.append(0.5 * (float(x1) + float(x2)))
 
-        # Stair signatures usually have repeated near-parallel treads and some riser edges.
-        if max(horizontal, vertical) < int(min_steps):
+        dom = horiz_pos if len(horiz_pos) >= len(vert_pos) else vert_pos
+        if len(dom) < int(min_steps):
+            continue
+
+        dom = sorted(dom)
+        filtered = [dom[0]]
+        for p in dom[1:]:
+            if abs(p - filtered[-1]) >= 2.0:
+                filtered.append(p)
+
+        if len(filtered) < int(min_steps):
+            continue
+
+        gaps = [filtered[i + 1] - filtered[i] for i in range(len(filtered) - 1)]
+        if not gaps:
+            continue
+        mean_gap = float(np.mean(gaps))
+        std_gap = float(np.std(gaps))
+
+        # Repeated treads/risers tend to have quasi-regular spacing.
+        if not (4.0 <= mean_gap <= 26.0 and std_gap <= 6.0):
             continue
 
         candidates.append({"x": int(x), "y": int(y), "w": int(w), "h": int(h)})
+
+    # Fallback: contour-driven search helps synthetic/simple drawings where edge components
+    # collapse into very small pieces.
+    if not candidates:
+        contours, _ = cv2.findContours(fg, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+        for contour in contours:
+            x, y, w, h = cv2.boundingRect(contour)
+            area = int(w * h)
+            if area < int(min_area) or area > int(max_area):
+                continue
+            aspect = max(w, h) / max(1.0, min(w, h))
+            if aspect < 1.08:
+                continue
+
+            roi = fg[y : y + h, x : x + w]
+            roi_edges = cv2.Canny(roi, 40, 120)
+            lines = cv2.HoughLinesP(
+                roi_edges,
+                rho=1,
+                theta=np.pi / 180,
+                threshold=max(10, int(min(w, h) * 0.12)),
+                minLineLength=max(6, int(min(w, h) * 0.2)),
+                maxLineGap=3,
+            )
+            if lines is None:
+                continue
+            horizontal = 0
+            vertical = 0
+            for line in lines:
+                x1, y1, x2, y2 = line[0]
+                ang = abs(math.degrees(math.atan2(float(y2 - y1), float(x2 - x1))))
+                if ang <= 15 or ang >= 165:
+                    horizontal += 1
+                elif 75 <= ang <= 105:
+                    vertical += 1
+            if max(horizontal, vertical) >= int(min_steps):
+                candidates.append({"x": int(x), "y": int(y), "w": int(w), "h": int(h)})
 
     return _dedupe_rect_candidates(candidates, iou_threshold=0.35)
