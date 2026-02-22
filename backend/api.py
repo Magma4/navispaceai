@@ -434,15 +434,15 @@ def create_app() -> FastAPI:
                 door_mask=pre.get("door_mask"),
                 prefer_ml_only=bool(pre.get("ml_used")),
             )
+            stairs = detect_staircases(pre["denoised"])
             doors = filter_door_candidates(
                 doors,
                 pre["gray"].shape,
                 primary_bbox=pre.get("primary_bbox"),
                 bbox_margin_px=max(18, int(min(pre["gray"].shape) * 0.015)),
                 walls=walls,
+                staircase_candidates=stairs,
             )
-            stairs = detect_staircases(pre["denoised"])
-
             grid, _ = walls_to_occupancy_grid(
                 image_shape=pre["gray"].shape,
                 walls=walls,
@@ -651,15 +651,15 @@ def create_app() -> FastAPI:
                     door_mask=pre.get("door_mask"),
                     prefer_ml_only=bool(pre.get("ml_used")),
                 )
+                stairs = detect_staircases(pre["denoised"])
                 doors = filter_door_candidates(
                     doors,
                     pre["gray"].shape,
                     primary_bbox=pre.get("primary_bbox"),
                     bbox_margin_px=max(18, int(min(pre["gray"].shape) * 0.015)),
                     walls=walls,
+                    staircase_candidates=stairs,
                 )
-                stairs = detect_staircases(pre["denoised"])
-
                 floor_artifacts[int(floor_number)] = {
                     "walls": walls,
                     "doors": doors,

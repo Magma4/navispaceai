@@ -546,9 +546,11 @@ def filter_door_candidates(
     primary_bbox: dict[str, int] | None = None,
     bbox_margin_px: int = 20,
     walls: list[WallSegment] | None = None,
+    staircase_candidates: list[StairCandidate] | None = None,
     max_wall_gap_px: float = 14.0,
+    max_stair_overlap_ratio: float = 0.3,
 ) -> list[DoorCandidate]:
-    """Filter door candidates to footprint bounds and nearby wall context."""
+    """Filter door candidates to footprint bounds + wall context, excluding stair artifacts."""
     if not doors:
         return []
 
@@ -583,6 +585,17 @@ def filter_door_candidates(
         proj_y = y1s + t * vy
         return math.hypot(px - proj_x, py - proj_y)
 
+    stairs = staircase_candidates or []
+
+    def _rect_intersection_area(a: dict[str, int], b: dict[str, int]) -> float:
+        ax0, ay0 = int(a["x"]), int(a["y"])
+        ax1, ay1 = ax0 + max(1, int(a["w"])), ay0 + max(1, int(a["h"]))
+        bx0, by0 = int(b["x"]), int(b["y"])
+        bx1, by1 = bx0 + max(1, int(b["w"])), by0 + max(1, int(b["h"]))
+        ix0, iy0 = max(ax0, bx0), max(ay0, by0)
+        ix1, iy1 = min(ax1, bx1), min(ay1, by1)
+        return float(max(0, ix1 - ix0) * max(0, iy1 - iy0))
+
     out: list[DoorCandidate] = []
     for door in doors:
         if not {"x", "y", "w", "h"}.issubset(door.keys()):
@@ -595,6 +608,18 @@ def filter_door_candidates(
         if walls:
             nearest = min(_point_to_seg_dist(float(cx), float(cy), seg) for seg in walls)
             if nearest > float(max_wall_gap_px):
+                continue
+
+        if stairs:
+            door_area = float(max(1, int(door["w"])) * max(1, int(door["h"])))
+            max_overlap = 0.0
+            for stair in stairs:
+                if not {"x", "y", "w", "h"}.issubset(stair.keys()):
+                    continue
+                ov = _rect_intersection_area(door, stair) / max(1e-6, door_area)
+                if ov > max_overlap:
+                    max_overlap = ov
+            if max_overlap >= float(max_stair_overlap_ratio):
                 continue
 
         out.append({"x": int(door["x"]), "y": int(door["y"]), "w": int(door["w"]), "h": int(door["h"])})

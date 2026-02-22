@@ -107,3 +107,24 @@ def test_filter_door_candidates_prefers_near_wall_openings() -> None:
 
     assert len(kept) == 1
     assert kept[0]["x"] == 10
+
+
+def test_filter_door_candidates_excludes_stair_overlaps() -> None:
+    """Door boxes heavily overlapping stairs should be removed."""
+    doors = [
+        {"x": 20, "y": 20, "w": 10, "h": 10},
+        {"x": 40, "y": 20, "w": 8, "h": 10},
+    ]
+    walls = [{"x1": 0, "y1": 25, "x2": 80, "y2": 25}]
+    stairs = [{"x": 18, "y": 18, "w": 16, "h": 16}]
+
+    kept = filter_door_candidates(
+        doors,
+        image_shape=(100, 100),
+        walls=walls,
+        staircase_candidates=stairs,
+        max_wall_gap_px=20.0,
+    )
+
+    assert len(kept) == 1
+    assert kept[0]["x"] == 40

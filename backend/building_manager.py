@@ -21,6 +21,7 @@ from shapely.geometry import Point, Polygon
 from backend.detection import (
     adaptive_hough_params,
     detect_doors,
+    detect_staircases,
     detect_walls,
     extract_walls_from_mask,
     filter_door_candidates,
@@ -204,12 +205,14 @@ class BuildingManager:
             door_mask=pre.get("door_mask"),
             prefer_ml_only=bool(pre.get("ml_used")),
         )
+        stairs = detect_staircases(pre["denoised"])
         doors = filter_door_candidates(
             doors,
             pre["gray"].shape,
             primary_bbox=pre.get("primary_bbox"),
             bbox_margin_px=max(18, int(min(pre["gray"].shape) * 0.015)),
             walls=walls,
+            staircase_candidates=stairs,
         )
 
         cell_size_px = max(1, int(round(resolved_cell_m / self.model_scale_m_per_px)))
