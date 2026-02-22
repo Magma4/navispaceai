@@ -20,6 +20,44 @@ DoorCandidate = dict[str, int]
 StairCandidate = dict[str, int]
 
 
+def _dedupe_rect_candidates(
+    rects: list[dict[str, int]],
+    iou_threshold: float = 0.45,
+) -> list[dict[str, int]]:
+    """Deduplicate overlapping rectangle candidates with simple NMS."""
+    if not rects:
+        return []
+
+    def _area(r: dict[str, int]) -> float:
+        return float(max(1, int(r.get("w", 1))) * max(1, int(r.get("h", 1))))
+
+    def _iou(a: dict[str, int], b: dict[str, int]) -> float:
+        ax0, ay0 = int(a.get("x", 0)), int(a.get("y", 0))
+        aw, ah = max(1, int(a.get("w", 1))), max(1, int(a.get("h", 1)))
+        bx0, by0 = int(b.get("x", 0)), int(b.get("y", 0))
+        bw, bh = max(1, int(b.get("w", 1))), max(1, int(b.get("h", 1)))
+
+        ax1, ay1 = ax0 + aw, ay0 + ah
+        bx1, by1 = bx0 + bw, by0 + bh
+
+        ix0, iy0 = max(ax0, bx0), max(ay0, by0)
+        ix1, iy1 = min(ax1, bx1), min(ay1, by1)
+        iw, ih = max(0, ix1 - ix0), max(0, iy1 - iy0)
+        inter = float(iw * ih)
+        if inter <= 0:
+            return 0.0
+        union = _area(a) + _area(b) - inter
+        return inter / max(1e-6, union)
+
+    ordered = sorted(rects, key=_area, reverse=True)
+    kept: list[dict[str, int]] = []
+    for rect in ordered:
+        if any(_iou(rect, prev) >= float(iou_threshold) for prev in kept):
+            continue
+        kept.append(rect)
+    return kept
+
+
 def _validate_binary_image(image: np.ndarray, name: str) -> None:
     """Validate a 2D grayscale/binary image array."""
     if not isinstance(image, np.ndarray):
@@ -560,7 +598,7 @@ def filter_door_candidates(
                 continue
 
         out.append({"x": int(door["x"]), "y": int(door["y"]), "w": int(door["w"]), "h": int(door["h"])})
-    return out
+    return _dedupe_rect_candidates(out, iou_threshold=0.45)
 
 
 def detect_doors(
@@ -600,7 +638,7 @@ def detect_doors(
                 ml_candidates.append({"x": int(x), "y": int(y), "w": int(w), "h": int(h)})
 
         if ml_candidates:
-            return ml_candidates
+            return _dedupe_rect_candidates(ml_candidates, iou_threshold=0.4)
         if prefer_ml_only:
             return []
 
@@ -616,7 +654,7 @@ def detect_doors(
         if 80 <= area <= 2000 and 5 <= min(w, h) <= 25 and max(w, h) <= 80:
             candidates.append({"x": int(x), "y": int(y), "w": int(w), "h": int(h)})
 
-    return candidates
+    return _dedupe_rect_candidates(candidates, iou_threshold=0.4)
 
 
 def detect_staircases(
@@ -679,4 +717,4 @@ def detect_staircases(
 
         candidates.append({"x": int(x), "y": int(y), "w": int(w), "h": int(h)})
 
-    return candidates
+    return _dedupe_rect_candidates(candidates, iou_threshold=0.35)

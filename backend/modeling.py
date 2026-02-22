@@ -89,7 +89,7 @@ def _raster_wall_run_meshes(
     model_scale_m_per_px: float,
     wall_height_m: float,
     wall_thickness_m: float,
-    min_run_px: int = 6,
+    min_run_px: int = 8,
 ) -> list[trimesh.Trimesh]:
     """Create wall boxes from horizontal and vertical runs on a denoised binary wall mask."""
     if wall_mask is None or wall_mask.size == 0 or wall_mask.ndim != 2:
@@ -236,7 +236,7 @@ def extrude_walls_to_scene(
         z2 = seg["y2"] * model_scale_m_per_px
 
         length, angle = _segment_length_and_angle(x1, z1, x2, z2)
-        if length <= 0.01:
+        if length <= 0.18:
             continue
 
         wall_mesh = trimesh.creation.box(extents=(length, wall_height_m, wall_thickness_m))
