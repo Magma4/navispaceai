@@ -27,7 +27,12 @@ function FloorModel({ url, elevationM, highlight }) {
       toneMapped: false,
     });
     const doorMaterial = new THREE.MeshBasicMaterial({
-      color: "#c58d63",
+      color: "#ff7a1a",
+      side: THREE.DoubleSide,
+      toneMapped: false,
+    });
+    const stairMaterial = new THREE.MeshBasicMaterial({
+      color: "#2da4ff",
       side: THREE.DoubleSide,
       toneMapped: false,
     });
@@ -35,27 +40,32 @@ function FloorModel({ url, elevationM, highlight }) {
     /**
      * Infer mesh kind when exported names are absent.
      * @param {THREE.Mesh} mesh
-     * @returns {"floor"|"door"|"wall"}
+     * @returns {"floor"|"door"|"stair"|"wall"|"unknown"}
      */
     const inferKind = (mesh) => {
       const name = String(mesh.name || "").toLowerCase();
-      if (name.includes("door")) return "door";
+      if (name.startsWith("door_") || name.includes("door")) return "door";
+      if (name.startsWith("stair_") || name.includes("stair")) return "stair";
       if (name.includes("floor")) return "floor";
-      if (name.includes("wall")) return "wall";
+      if (name.startsWith("wall_") || name.includes("wall")) return "wall";
 
       const geometry = mesh.geometry;
-      if (!geometry) return "wall";
+      if (!geometry) return "unknown";
       if (!geometry.boundingBox) geometry.computeBoundingBox();
-      if (!geometry.boundingBox) return "wall";
+      if (!geometry.boundingBox) return "unknown";
 
       const size = new THREE.Vector3();
       geometry.boundingBox.getSize(size);
       const sy = Math.abs(size.y * mesh.scale.y);
       const sx = Math.abs(size.x * mesh.scale.x);
       const sz = Math.abs(size.z * mesh.scale.z);
-      if (sy < 0.18 && Math.max(sx, sz) > 1.25) return "floor";
-      if (sy > 1.3 && sy < 2.6 && Math.max(sx, sz) < 2.2) return "door";
-      return "wall";
+      const longSide = Math.max(sx, sz);
+      const shortSide = Math.min(sx, sz);
+
+      if (sy < 0.18 && longSide > 1.25) return "floor";
+      if (sy > 1.65 && sy < 2.5 && shortSide < 0.14 && longSide < 1.5) return "door";
+      if (sy <= 2.0 && shortSide >= 0.2 && shortSide <= 1.4 && longSide >= 0.35 && longSide <= 3.0) return "stair";
+      return "unknown";
     };
 
     scene.traverse((obj) => {
@@ -65,13 +75,16 @@ function FloorModel({ url, elevationM, highlight }) {
       const kind = inferKind(obj);
       if (kind === "floor") obj.material = floorMaterial;
       else if (kind === "door") obj.material = doorMaterial;
-      else obj.material = wallMaterial;
+      else if (kind === "stair") obj.material = stairMaterial;
+      else if (kind === "wall") obj.material = wallMaterial;
+      // unknown: keep original GLB material
     });
 
     return () => {
       wallMaterial.dispose();
       floorMaterial.dispose();
       doorMaterial.dispose();
+      stairMaterial.dispose();
     };
   }, [scene]);
 

@@ -102,37 +102,55 @@ function BuildingModel({ url, onBounds }) {
       opacity: 0.92,
     });
 
-    const doorMaterial = new THREE.MeshLambertMaterial({
-      color: "#c4905e",
+    const doorMaterial = new THREE.MeshStandardMaterial({
+      color: "#ff7a1a",
+      emissive: "#ff7a1a",
+      emissiveIntensity: 0.28,
       side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.95,
+      roughness: 0.45,
+      metalness: 0.06,
+    });
+
+    const stairMaterial = new THREE.MeshStandardMaterial({
+      color: "#2da4ff",
+      emissive: "#2da4ff",
+      emissiveIntensity: 0.18,
+      side: THREE.DoubleSide,
+      roughness: 0.52,
+      metalness: 0.04,
     });
 
     /**
      * Infer semantic type when mesh names are missing in exported GLB.
      * @param {THREE.Mesh} obj
-     * @returns {"floor"|"door"|"wall"}
+     * @returns {"floor"|"door"|"stair"|"wall"|"unknown"}
      */
     const inferMeshType = (obj) => {
       const name = String(obj.name || "").toLowerCase();
-      if (name.includes("door")) return "door";
+      if (name.startsWith("door_") || name.includes("door")) return "door";
+      if (name.startsWith("stair_") || name.includes("stair")) return "stair";
       if (name.includes("floor")) return "floor";
-      if (name.includes("wall")) return "wall";
+      if (name.startsWith("wall_") || name.includes("wall")) return "wall";
 
       const geom = obj.geometry;
-      if (!geom) return "wall";
+      if (!geom) return "unknown";
       if (!geom.boundingBox) geom.computeBoundingBox();
-      if (!geom.boundingBox) return "wall";
+      if (!geom.boundingBox) return "unknown";
 
       const size = new THREE.Vector3();
       geom.boundingBox.getSize(size);
       const sx = Math.abs(size.x * obj.scale.x);
       const sy = Math.abs(size.y * obj.scale.y);
       const sz = Math.abs(size.z * obj.scale.z);
-      const horizontalSpan = Math.max(sx, sz);
+      const longSide = Math.max(sx, sz);
+      const shortSide = Math.min(sx, sz);
 
-      if (sy < 0.2 && horizontalSpan > 1.4) return "floor";
-      if (sy > 1.4 && sy < 2.6 && horizontalSpan < 2.2) return "door";
-      return "wall";
+      if (sy < 0.2 && longSide > 1.4) return "floor";
+      if (sy > 1.65 && sy < 2.5 && shortSide < 0.14 && longSide < 1.5) return "door";
+      if (sy <= 2.0 && shortSide >= 0.2 && shortSide <= 1.4 && longSide >= 0.35 && longSide <= 3.0) return "stair";
+      return "unknown";
     };
 
     scene.traverse((obj) => {
@@ -147,8 +165,10 @@ function BuildingModel({ url, onBounds }) {
 
       const kind = inferMeshType(obj);
       if (kind === "door") obj.material = doorMaterial;
+      else if (kind === "stair") obj.material = stairMaterial;
       else if (kind === "floor") obj.material = floorMaterial;
-      else obj.material = wallMaterial;
+      else if (kind === "wall") obj.material = wallMaterial;
+      // unknown: preserve original GLB material instead of flattening to walls
     });
 
     const box = new THREE.Box3().setFromObject(scene);
@@ -170,6 +190,7 @@ function BuildingModel({ url, onBounds }) {
       wallMaterial.dispose();
       floorMaterial.dispose();
       doorMaterial.dispose();
+      stairMaterial.dispose();
     };
   }, [scene, onBounds]);
 
