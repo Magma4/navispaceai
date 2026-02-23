@@ -689,11 +689,17 @@ def detect_staircases(
     max_area: int = 30000,
     min_steps: int = 4,
 ) -> list[StairCandidate]:
-    """Detect staircase-like regions from repeated parallel tread patterns."""
+    """Detect staircase-like regions from repeated parallel tread patterns.
+
+    Tightened to reduce random placements: we require regular line spacing,
+    dominant orientation, and sensible local footprint relative to the plan.
+    """
     _validate_binary_image(binary, "binary")
 
     fg = (binary > 0).astype(np.uint8) * 255
     edges = cv2.Canny(fg, 35, 120)
+    img_h, img_w = fg.shape[:2]
+    dynamic_max_area = min(int(max_area), max(int(img_h * img_w * 0.50), int(min_area) + 1))
 
     # Component proposals are more reliable than external contours on fully connected plans.
     num_labels, labels, stats, _ = cv2.connectedComponentsWithStats((edges > 0).astype(np.uint8), connectivity=8)
@@ -705,18 +711,27 @@ def detect_staircases(
         w = int(stats[label, cv2.CC_STAT_WIDTH])
         h = int(stats[label, cv2.CC_STAT_HEIGHT])
         area = int(w * h)
-        if area < int(min_area) or area > int(max_area):
+        if area < int(min_area) or area > int(dynamic_max_area):
+            continue
+
+        # Avoid huge/broad random regions; stairs are usually elongated but local.
+        if w > int(img_w * 0.80) or h > int(img_h * 0.80):
             continue
 
         aspect = max(w, h) / max(1.0, min(w, h))
-        if aspect < 1.15:
+        if aspect < 1.10:
             continue
 
         roi = fg[y : y + h, x : x + w]
         if roi.size == 0:
             continue
-        roi_edges = cv2.Canny(roi, 35, 120)
 
+        # Stair areas should contain repeated strokes, not solid blobs.
+        ink_ratio = float(np.count_nonzero(roi > 0)) / float(roi.size)
+        if ink_ratio < 0.015 or ink_ratio > 0.42:
+            continue
+
+        roi_edges = cv2.Canny(roi, 35, 120)
         lines = cv2.HoughLinesP(
             roi_edges,
             rho=1,
@@ -739,7 +754,13 @@ def detect_staircases(
                 vert_pos.append(0.5 * (float(x1) + float(x2)))
 
         dom = horiz_pos if len(horiz_pos) >= len(vert_pos) else vert_pos
+        orth = vert_pos if dom is horiz_pos else horiz_pos
         if len(dom) < int(min_steps):
+            continue
+
+        # Enforce orientation dominance (stairs => many repeated parallel treads/risers).
+        dom_ratio = len(dom) / float(max(1, len(dom) + len(orth)))
+        if dom_ratio < 0.62:
             continue
 
         dom = sorted(dom)
@@ -758,25 +779,30 @@ def detect_staircases(
         std_gap = float(np.std(gaps))
 
         # Repeated treads/risers tend to have quasi-regular spacing.
-        if not (4.0 <= mean_gap <= 26.0 and std_gap <= 6.0):
+        if not (4.0 <= mean_gap <= 24.0 and std_gap <= 4.8):
             continue
 
         candidates.append({"x": int(x), "y": int(y), "w": int(w), "h": int(h)})
 
-    # Fallback: contour-driven search helps synthetic/simple drawings where edge components
-    # collapse into very small pieces.
+    # Fallback: contour-driven search for simple/synthetic drawings.
     if not candidates:
         contours, _ = cv2.findContours(fg, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
         for contour in contours:
             x, y, w, h = cv2.boundingRect(contour)
             area = int(w * h)
-            if area < int(min_area) or area > int(max_area):
+            if area < int(min_area) or area > int(dynamic_max_area):
+                continue
+            if w > int(img_w * 0.80) or h > int(img_h * 0.80):
                 continue
             aspect = max(w, h) / max(1.0, min(w, h))
-            if aspect < 1.08:
+            if aspect < 1.12:
                 continue
 
             roi = fg[y : y + h, x : x + w]
+            ink_ratio = float(np.count_nonzero(roi > 0)) / float(max(1, roi.size))
+            if ink_ratio < 0.015 or ink_ratio > 0.42:
+                continue
+
             roi_edges = cv2.Canny(roi, 40, 120)
             lines = cv2.HoughLinesP(
                 roi_edges,
@@ -797,7 +823,8 @@ def detect_staircases(
                     horizontal += 1
                 elif 75 <= ang <= 105:
                     vertical += 1
-            if max(horizontal, vertical) >= int(min_steps):
+            total = max(1, horizontal + vertical)
+            if max(horizontal, vertical) >= int(min_steps) and (max(horizontal, vertical) / float(total)) >= 0.62:
                 candidates.append({"x": int(x), "y": int(y), "w": int(w), "h": int(h)})
 
     return _dedupe_rect_candidates(candidates, iou_threshold=0.35)
