@@ -220,6 +220,10 @@ def extrude_walls_to_scene(
 
     stair_rects = [s for s in (staircase_candidates or []) if {"x", "y", "w", "h"}.issubset(s.keys())]
     stair_rects_world: list[tuple[float, float, float, float]] = []
+
+    # Stairwell lock mask in source-pixel space (hard no-wall zone).
+    stair_lock_mask = np.zeros(image_shape, dtype=np.uint8)
+
     for stair in stair_rects:
         sx = float(stair["x"])
         sy = float(stair["y"])
@@ -232,21 +236,17 @@ def extrude_walls_to_scene(
             (sy + sh) * model_scale_m_per_px,
         ))
 
+        pad = 24.0
+        x0 = max(0, int(math.floor(sx - pad)))
+        y0 = max(0, int(math.floor(sy - pad)))
+        x1 = min(stair_lock_mask.shape[1], int(math.ceil(sx + sw + pad)))
+        y1 = min(stair_lock_mask.shape[0], int(math.ceil(sy + sh + pad)))
+        stair_lock_mask[y0:y1, x0:x1] = 255
+
     wall_mask_for_mesh = wall_mask if wall_mask is not None else np.zeros(image_shape, dtype=np.uint8)
     if stair_rects and wall_mask_for_mesh.size > 0:
         wall_mask_for_mesh = wall_mask_for_mesh.copy()
-        for stair in stair_rects:
-            sx = int(stair["x"])
-            sy = int(stair["y"])
-            sw = max(1, int(stair["w"]))
-            sh = max(1, int(stair["h"]))
-            # Stronger carve so staircase geometry replaces local wall strips.
-            pad = 22
-            x0 = max(0, sx - pad)
-            y0 = max(0, sy - pad)
-            x1 = min(wall_mask_for_mesh.shape[1], sx + sw + pad)
-            y1 = min(wall_mask_for_mesh.shape[0], sy + sh + pad)
-            wall_mask_for_mesh[y0:y1, x0:x1] = 0
+        wall_mask_for_mesh[stair_lock_mask > 0] = 0
 
     def _mesh_overlaps_stairs_world(mesh: trimesh.Trimesh) -> bool:
         if not stair_rects_world:
@@ -280,51 +280,28 @@ def extrude_walls_to_scene(
         scene.add_geometry(wall_mesh, geom_name=f"wall_raster_{raster_idx}")
         raster_idx += 1
 
+    has_stair_lock = stair_lock_mask.size > 0 and np.count_nonzero(stair_lock_mask) > 0
+
     def _segment_overlaps_stairs(seg: WallSegment) -> bool:
-        if not stair_rects:
+        if not has_stair_lock:
             return False
 
         x1 = float(seg["x1"])
         y1 = float(seg["y1"])
         x2 = float(seg["x2"])
         y2 = float(seg["y2"])
-        mx = 0.5 * (x1 + x2)
-        my = 0.5 * (y1 + y2)
 
-        seg_min_x = min(x1, x2)
-        seg_max_x = max(x1, x2)
-        seg_min_y = min(y1, y2)
-        seg_max_y = max(y1, y2)
-
-        for stair in stair_rects:
-            sx = float(stair["x"])
-            sy = float(stair["y"])
-            sw = max(1.0, float(stair["w"]))
-            sh = max(1.0, float(stair["h"]))
-
-            # Expand aggressively so wall strips touching stairwell edge are removed.
-            pad = 16.0
-            rx0 = sx - pad
-            ry0 = sy - pad
-            rx1 = sx + sw + pad
-            ry1 = sy + sh + pad
-
-            # Fast reject via AABB overlap.
-            if seg_max_x < rx0 or seg_min_x > rx1 or seg_max_y < ry0 or seg_min_y > ry1:
-                continue
-
-            # If either endpoint or midpoint lies in the stair rectangle, treat as overlap.
-            if (
-                (rx0 <= x1 <= rx1 and ry0 <= y1 <= ry1)
-                or (rx0 <= x2 <= rx1 and ry0 <= y2 <= ry1)
-                or (rx0 <= mx <= rx1 and ry0 <= my <= ry1)
-            ):
+        # Sample along the segment in pixel space and reject if any sample enters
+        # the locked stairwell zone.
+        seg_len = max(abs(x2 - x1), abs(y2 - y1))
+        steps = max(3, int(seg_len / 3.0))
+        h, w = stair_lock_mask.shape[:2]
+        for i in range(steps + 1):
+            t = i / max(1, steps)
+            sx = int(round(x1 + (x2 - x1) * t))
+            sy = int(round(y1 + (y2 - y1) * t))
+            if 0 <= sx < w and 0 <= sy < h and int(stair_lock_mask[sy, sx]) > 0:
                 return True
-
-            # Collinear strips that pass through the expanded stair AABB should also be removed.
-            # (The AABB overlap above already guarantees close proximity.)
-            return True
-
         return False
 
     # Keep vector walls too; they add directional fidelity on top of raster runs.
