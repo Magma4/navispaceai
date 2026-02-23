@@ -219,6 +219,18 @@ def extrude_walls_to_scene(
     scene.add_geometry(floor, geom_name="floor")
 
     stair_rects = [s for s in (staircase_candidates or []) if {"x", "y", "w", "h"}.issubset(s.keys())]
+    stair_rects_world: list[tuple[float, float, float, float]] = []
+    for stair in stair_rects:
+        sx = float(stair["x"])
+        sy = float(stair["y"])
+        sw = max(1.0, float(stair["w"]))
+        sh = max(1.0, float(stair["h"]))
+        stair_rects_world.append((
+            sx * model_scale_m_per_px,
+            sy * model_scale_m_per_px,
+            (sx + sw) * model_scale_m_per_px,
+            (sy + sh) * model_scale_m_per_px,
+        ))
 
     wall_mask_for_mesh = wall_mask if wall_mask is not None else np.zeros(image_shape, dtype=np.uint8)
     if stair_rects and wall_mask_for_mesh.size > 0:
@@ -228,12 +240,31 @@ def extrude_walls_to_scene(
             sy = int(stair["y"])
             sw = max(1, int(stair["w"]))
             sh = max(1, int(stair["h"]))
-            pad = 3
+            # Stronger carve so staircase geometry replaces local wall strips.
+            pad = 12
             x0 = max(0, sx - pad)
             y0 = max(0, sy - pad)
             x1 = min(wall_mask_for_mesh.shape[1], sx + sw + pad)
             y1 = min(wall_mask_for_mesh.shape[0], sy + sh + pad)
             wall_mask_for_mesh[y0:y1, x0:x1] = 0
+
+    def _mesh_overlaps_stairs_world(mesh: trimesh.Trimesh) -> bool:
+        if not stair_rects_world:
+            return False
+        bounds = mesh.bounds
+        if bounds is None or len(bounds) != 2:
+            return False
+        min_x, _, min_z = float(bounds[0][0]), float(bounds[0][1]), float(bounds[0][2])
+        max_x, _, max_z = float(bounds[1][0]), float(bounds[1][1]), float(bounds[1][2])
+        pad_m = max(0.08, model_scale_m_per_px * 8.0)
+        for sx0, sz0, sx1, sz1 in stair_rects_world:
+            rx0 = sx0 - pad_m
+            rz0 = sz0 - pad_m
+            rx1 = sx1 + pad_m
+            rz1 = sz1 + pad_m
+            if not (max_x < rx0 or min_x > rx1 or max_z < rz0 or min_z > rz1):
+                return True
+        return False
 
     raster_meshes = _raster_wall_run_meshes(
         wall_mask_for_mesh,
@@ -241,9 +272,13 @@ def extrude_walls_to_scene(
         wall_height_m=wall_height_m,
         wall_thickness_m=wall_thickness_m,
     )
-    for idx, wall_mesh in enumerate(raster_meshes):
+    raster_idx = 0
+    for wall_mesh in raster_meshes:
+        if _mesh_overlaps_stairs_world(wall_mesh):
+            continue
         _apply_face_color(wall_mesh, wall_color_rgba)
-        scene.add_geometry(wall_mesh, geom_name=f"wall_raster_{idx}")
+        scene.add_geometry(wall_mesh, geom_name=f"wall_raster_{raster_idx}")
+        raster_idx += 1
 
     def _segment_overlaps_stairs(seg: WallSegment) -> bool:
         if not stair_rects:
