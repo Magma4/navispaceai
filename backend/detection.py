@@ -600,8 +600,19 @@ def filter_door_candidates(
     for door in doors:
         if not {"x", "y", "w", "h"}.issubset(door.keys()):
             continue
-        cx = int(door["x"] + max(1, door["w"]) / 2)
-        cy = int(door["y"] + max(1, door["h"]) / 2)
+
+        dw = max(1, int(door["w"]))
+        dh = max(1, int(door["h"]))
+        darea = float(dw * dh)
+        dshort = float(min(dw, dh))
+        dlong = float(max(dw, dh))
+        if darea < 90.0 or darea > 3000.0:
+            continue
+        if not (6.0 <= dshort <= 28.0 and 12.0 <= dlong <= 120.0):
+            continue
+
+        cx = int(door["x"] + dw / 2)
+        cy = int(door["y"] + dh / 2)
         if not (x0 <= cx <= x1 and y0 <= cy <= y1):
             continue
 
@@ -622,8 +633,11 @@ def filter_door_candidates(
             if max_overlap >= float(max_stair_overlap_ratio):
                 continue
 
-        out.append({"x": int(door["x"]), "y": int(door["y"]), "w": int(door["w"]), "h": int(door["h"])})
-    return _dedupe_rect_candidates(out, iou_threshold=0.45)
+        out.append({"x": int(door["x"]), "y": int(door["y"]), "w": dw, "h": dh})
+
+    out = _dedupe_rect_candidates(out, iou_threshold=0.45)
+    out.sort(key=lambda d: int(d["w"]) * int(d["h"]), reverse=True)
+    return out[:120]
 
 
 def filter_stair_candidates(
@@ -778,11 +792,11 @@ def detect_doors(
         x, y, w, h = cv2.boundingRect(contour)
         area = w * h
 
-        # Door-sized rectangular gaps in blueprint pixel space (recall-boosted window).
+        # Door-sized rectangular gaps in blueprint pixel space (balanced recall/precision).
         short = min(w, h)
         long = max(w, h)
         aspect = long / max(1.0, float(short))
-        if 40 <= area <= 4200 and 4 <= short <= 36 and 8 <= long <= 150 and 1.15 <= aspect <= 8.0:
+        if 90 <= area <= 2800 and 6 <= short <= 26 and 12 <= long <= 110 and 1.2 <= aspect <= 5.2:
             candidates.append({"x": int(x), "y": int(y), "w": int(w), "h": int(h)})
 
     # Secondary pass: detect compact door-leaf arcs/strokes from edges and merge.
@@ -793,7 +807,7 @@ def detect_doors(
         area = w * h
         short = min(w, h)
         long = max(w, h)
-        if 36 <= area <= 2600 and 4 <= short <= 24 and 10 <= long <= 90:
+        if 80 <= area <= 1400 and 5 <= short <= 18 and 12 <= long <= 64:
             candidates.append({"x": int(x), "y": int(y), "w": int(w), "h": int(h)})
 
     return _dedupe_rect_candidates(candidates, iou_threshold=0.38)

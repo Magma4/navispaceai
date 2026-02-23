@@ -241,7 +241,7 @@ def extrude_walls_to_scene(
             sw = max(1, int(stair["w"]))
             sh = max(1, int(stair["h"]))
             # Stronger carve so staircase geometry replaces local wall strips.
-            pad = 12
+            pad = 22
             x0 = max(0, sx - pad)
             y0 = max(0, sy - pad)
             x1 = min(wall_mask_for_mesh.shape[1], sx + sw + pad)
@@ -256,7 +256,7 @@ def extrude_walls_to_scene(
             return False
         min_x, _, min_z = float(bounds[0][0]), float(bounds[0][1]), float(bounds[0][2])
         max_x, _, max_z = float(bounds[1][0]), float(bounds[1][1]), float(bounds[1][2])
-        pad_m = max(0.08, model_scale_m_per_px * 8.0)
+        pad_m = max(0.16, model_scale_m_per_px * 20.0)
         for sx0, sz0, sx1, sz1 in stair_rects_world:
             rx0 = sx0 - pad_m
             rz0 = sz0 - pad_m
@@ -302,8 +302,8 @@ def extrude_walls_to_scene(
             sw = max(1.0, float(stair["w"]))
             sh = max(1.0, float(stair["h"]))
 
-            # Expand slightly so wall strips touching the stairwell edge are removed.
-            pad = 4.0
+            # Expand aggressively so wall strips touching stairwell edge are removed.
+            pad = 16.0
             rx0 = sx - pad
             ry0 = sy - pad
             rx1 = sx + sw + pad
