@@ -696,7 +696,17 @@ def filter_stair_candidates(
         kept.append({"x": int(stair["x"]), "y": int(stair["y"]), "w": w, "h": h})
 
     kept = _dedupe_rect_candidates(kept, iou_threshold=0.4)
-    kept.sort(key=lambda s: int(s["w"]) * int(s["h"]), reverse=True)
+
+    def _score(stair: StairCandidate) -> float:
+        # Prefer explicit detector confidence when available; fallback to area.
+        if "score" in stair:
+            try:
+                return float(stair.get("score", 0.0))
+            except Exception:
+                pass
+        return float(int(stair.get("w", 1)) * int(stair.get("h", 1)))
+
+    kept.sort(key=_score, reverse=True)
     return kept[: max(1, int(max_candidates))]
 
 
@@ -856,7 +866,8 @@ def detect_staircases(
         if not (4.0 <= mean_gap <= 24.0 and std_gap <= 4.8):
             continue
 
-        candidates.append({"x": int(x), "y": int(y), "w": int(w), "h": int(h)})
+        score = float(len(filtered)) * float(dom_ratio) * (float(aspect) / (1.0 + float(std_gap)))
+        candidates.append({"x": int(x), "y": int(y), "w": int(w), "h": int(h), "score": score})
 
     # Fallback: contour-driven search for simple/synthetic drawings.
     if not candidates:
@@ -898,7 +909,10 @@ def detect_staircases(
                 elif 75 <= ang <= 105:
                     vertical += 1
             total = max(1, horizontal + vertical)
-            if max(horizontal, vertical) >= int(min_steps) and (max(horizontal, vertical) / float(total)) >= 0.62:
-                candidates.append({"x": int(x), "y": int(y), "w": int(w), "h": int(h)})
+            dom_count = max(horizontal, vertical)
+            dom_ratio = dom_count / float(total)
+            if dom_count >= int(min_steps) and dom_ratio >= 0.62:
+                score = float(dom_count) * float(dom_ratio) * float(aspect)
+                candidates.append({"x": int(x), "y": int(y), "w": int(w), "h": int(h), "score": score})
 
     return _dedupe_rect_candidates(candidates, iou_threshold=0.35)
