@@ -634,7 +634,8 @@ def filter_stair_candidates(
     bbox_margin_px: int = 20,
     walls: list[WallSegment] | None = None,
     max_wall_gap_px: float = 26.0,
-    max_candidates: int = 1,
+    max_candidates: int = 4,
+    min_relative_score: float = 0.72,
 ) -> list[StairCandidate]:
     """Filter staircase candidates to keep only plausible in-footprint placements.
 
@@ -693,7 +694,10 @@ def filter_stair_candidates(
             if nearest > float(max_wall_gap_px):
                 continue
 
-        kept.append({"x": int(stair["x"]), "y": int(stair["y"]), "w": w, "h": h})
+        candidate: StairCandidate = {"x": int(stair["x"]), "y": int(stair["y"]), "w": w, "h": h}
+        if "score" in stair:
+            candidate["score"] = float(stair.get("score", 0.0))
+        kept.append(candidate)
 
     kept = _dedupe_rect_candidates(kept, iou_threshold=0.4)
 
@@ -707,7 +711,14 @@ def filter_stair_candidates(
         return float(int(stair.get("w", 1)) * int(stair.get("h", 1)))
 
     kept.sort(key=_score, reverse=True)
-    return kept[: max(1, int(max_candidates))]
+
+    if not kept:
+        return []
+
+    best = max(1e-6, _score(kept[0]))
+    threshold = max(0.0, float(min_relative_score)) * best
+    selected = [s for s in kept if _score(s) >= threshold]
+    return selected[: max(1, int(max_candidates))]
 
 
 def detect_doors(

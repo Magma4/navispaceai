@@ -443,7 +443,7 @@ def create_app() -> FastAPI:
                 bbox_margin_px=max(18, int(min(pre["gray"].shape) * 0.015)),
                 walls=walls,
                 max_wall_gap_px=28.0,
-                max_candidates=1,
+                max_candidates=4,
             )
             doors = filter_door_candidates(
                 doors,
@@ -669,7 +669,7 @@ def create_app() -> FastAPI:
                     bbox_margin_px=max(18, int(min(pre["gray"].shape) * 0.015)),
                     walls=walls,
                     max_wall_gap_px=28.0,
-                    max_candidates=1,
+                    max_candidates=4,
                 )
                 doors = filter_door_candidates(
                     doors,
