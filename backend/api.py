@@ -343,6 +343,53 @@ def _nearest_free_cell(
     return None
 
 
+def _write_detection_overlay(
+    gray: np.ndarray,
+    walls: list[dict[str, int]],
+    doors: list[dict[str, int]],
+    stairs: list[dict[str, int]],
+    tag: str,
+) -> str:
+    """Write a debug overlay image with detected walls/doors/stairs."""
+    canvas = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+
+    for seg in walls:
+        if {"x1", "y1", "x2", "y2"}.issubset(seg.keys()):
+            cv2.line(
+                canvas,
+                (int(seg["x1"]), int(seg["y1"])),
+                (int(seg["x2"]), int(seg["y2"])),
+                (120, 120, 120),
+                1,
+                cv2.LINE_AA,
+            )
+
+    for door in doors:
+        if {"x", "y", "w", "h"}.issubset(door.keys()):
+            x, y, w, h = int(door["x"]), int(door["y"]), int(door["w"]), int(door["h"])
+            cv2.rectangle(canvas, (x, y), (x + w, y + h), (40, 140, 250), 2)
+
+    for idx, stair in enumerate(stairs, start=1):
+        if {"x", "y", "w", "h"}.issubset(stair.keys()):
+            x, y, w, h = int(stair["x"]), int(stair["y"]), int(stair["w"]), int(stair["h"])
+            cv2.rectangle(canvas, (x, y), (x + w, y + h), (255, 180, 40), 2)
+            cv2.putText(
+                canvas,
+                f"S{idx}",
+                (x, max(12, y - 4)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.45,
+                (255, 180, 40),
+                1,
+                cv2.LINE_AA,
+            )
+
+    out_name = f"detect_{tag}.png"
+    out_path = Path("backend/generated/debug") / out_name
+    cv2.imwrite(str(out_path), canvas)
+    return f"/generated/debug/{out_name}"
+
+
 def create_app() -> FastAPI:
     """Create and configure the FastAPI application."""
     ensure_directories()
@@ -452,6 +499,7 @@ def create_app() -> FastAPI:
                 bbox_margin_px=max(18, int(min(pre["gray"].shape) * 0.015)),
                 walls=walls,
                 staircase_candidates=stairs,
+                max_wall_gap_px=26.0,
             )
             grid, _ = walls_to_occupancy_grid(
                 image_shape=pre["gray"].shape,
@@ -463,6 +511,7 @@ def create_app() -> FastAPI:
             )
 
             ts = int(time.time() * 1000)
+            debug_overlay_url = _write_detection_overlay(pre["gray"], walls, doors, stairs, str(ts))
             grid_path = f"backend/generated/grids/grid_{ts}.json"
             export_grid_json(
                 grid_path,
@@ -505,6 +554,7 @@ def create_app() -> FastAPI:
                 "cell_size_m": STATE.cell_size_m,
                 "model_url": STATE.model_url,
                 "grid_url": f"/generated/grids/{Path(grid_path).name}",
+                "debug_overlay_url": debug_overlay_url,
                 "ml_used": bool(pre.get("ml_used")),
                 "ml_enabled": bool(pre.get("ml_enabled")),
                 "ml_engine_loaded": bool(pre.get("ml_engine_loaded")),
@@ -678,6 +728,7 @@ def create_app() -> FastAPI:
                     bbox_margin_px=max(18, int(min(pre["gray"].shape) * 0.015)),
                     walls=walls,
                     staircase_candidates=stairs,
+                    max_wall_gap_px=26.0,
                 )
                 floor_artifacts[int(floor_number)] = {
                     "walls": walls,

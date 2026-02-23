@@ -702,13 +702,21 @@ def filter_stair_candidates(
     kept = _dedupe_rect_candidates(kept, iou_threshold=0.4)
 
     def _score(stair: StairCandidate) -> float:
-        # Prefer explicit detector confidence when available; fallback to area.
+        # Prefer explicit detector confidence; blend with boundary proximity
+        # so edge stairwells are favored over central false positives.
         if "score" in stair:
             try:
-                return float(stair.get("score", 0.0))
+                base = float(stair.get("score", 0.0))
             except Exception:
-                pass
-        return float(int(stair.get("w", 1)) * int(stair.get("h", 1)))
+                base = 0.0
+        else:
+            base = float(int(stair.get("w", 1)) * int(stair.get("h", 1)))
+
+        cx = float(stair.get("x", 0)) + max(1.0, float(stair.get("w", 1))) * 0.5
+        cy = float(stair.get("y", 0)) + max(1.0, float(stair.get("h", 1))) * 0.5
+        edge_dist = min(cx - x0, x1 - cx, cy - y0, y1 - cy)
+        edge_bonus = 1.0 + max(0.0, (80.0 - edge_dist)) / 140.0
+        return base * edge_bonus
 
     kept.sort(key=_score, reverse=True)
 
@@ -763,18 +771,32 @@ def detect_doors(
             return []
 
     inverted = cv2.bitwise_not(binary)
-    contours, _ = cv2.findContours(inverted, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    contours, _ = cv2.findContours(inverted, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
 
     candidates: list[DoorCandidate] = []
     for contour in contours:
         x, y, w, h = cv2.boundingRect(contour)
         area = w * h
 
-        # Door-sized rectangular gaps in blueprint pixel space (heuristic window).
-        if 60 <= area <= 3200 and 5 <= min(w, h) <= 30 and max(w, h) <= 110:
+        # Door-sized rectangular gaps in blueprint pixel space (recall-boosted window).
+        short = min(w, h)
+        long = max(w, h)
+        aspect = long / max(1.0, float(short))
+        if 40 <= area <= 4200 and 4 <= short <= 36 and 8 <= long <= 150 and 1.15 <= aspect <= 8.0:
             candidates.append({"x": int(x), "y": int(y), "w": int(w), "h": int(h)})
 
-    return _dedupe_rect_candidates(candidates, iou_threshold=0.4)
+    # Secondary pass: detect compact door-leaf arcs/strokes from edges and merge.
+    edges = cv2.Canny(binary, 35, 110)
+    edge_contours, _ = cv2.findContours(edges, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+    for contour in edge_contours:
+        x, y, w, h = cv2.boundingRect(contour)
+        area = w * h
+        short = min(w, h)
+        long = max(w, h)
+        if 36 <= area <= 2600 and 4 <= short <= 24 and 10 <= long <= 90:
+            candidates.append({"x": int(x), "y": int(y), "w": int(w), "h": int(h)})
+
+    return _dedupe_rect_candidates(candidates, iou_threshold=0.38)
 
 
 def detect_staircases(

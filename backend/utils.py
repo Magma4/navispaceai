@@ -18,6 +18,7 @@ def ensure_directories() -> None:
     """Create runtime output directories if they do not already exist."""
     Path("backend/generated/models").mkdir(parents=True, exist_ok=True)
     Path("backend/generated/grids").mkdir(parents=True, exist_ok=True)
+    Path("backend/generated/debug").mkdir(parents=True, exist_ok=True)
 
 
 def to_serializable_path(path: Iterable[tuple[int, int]]) -> list[dict[str, int]]:
