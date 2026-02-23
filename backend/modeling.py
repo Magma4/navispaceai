@@ -402,12 +402,10 @@ def extrude_walls_to_scene(
         width_m = max(0.8, min(stair_w_px, stair_h_px) * model_scale_m_per_px)
         yaw = 0.0 if stair_w_px >= stair_h_px else math.pi / 2.0
 
-        # Proper-looking staircase assembly (uniform treads + optional top landing).
-        step_count = int(max(8, min(18, round(run_m / 0.26))))
-        tread_m = max(0.20, run_m / max(1, step_count))
-        step_thickness_m = max(0.035, min(0.06, wall_thickness_m * 0.35))
-        total_rise_m = min(2.9, max(2.2, wall_height_m * 0.8))
-        riser_m = total_rise_m / max(1, step_count)
+        # Legacy stair mesh (stable placeholder while detection is improved).
+        step_count = int(max(5, min(14, round(run_m / 0.28))))
+        tread_m = run_m / max(1, step_count)
+        riser_m = min(0.18, max(0.12, wall_height_m * 0.05))
 
         start_offset = -run_m * 0.5 + tread_m * 0.5
         cos_y, sin_y = math.cos(yaw), math.sin(yaw)
@@ -417,25 +415,14 @@ def extrude_walls_to_scene(
             local_z = 0.0
             world_x = center_x + local_x * cos_y - local_z * sin_y
             world_z = center_z + local_x * sin_y + local_z * cos_y
-            step_y = riser_m * (step_idx + 1)
+            step_h = riser_m * (step_idx + 1)
 
-            step_mesh = trimesh.creation.box(extents=(tread_m * 0.96, step_thickness_m, width_m * 0.96))
+            step_mesh = trimesh.creation.box(extents=(tread_m * 0.95, step_h, width_m * 0.96))
             rot = trimesh.transformations.rotation_matrix(yaw, [0, 1, 0])
-            tr = trimesh.transformations.translation_matrix([world_x, step_y - step_thickness_m / 2.0, world_z])
+            tr = trimesh.transformations.translation_matrix([world_x, step_h / 2.0, world_z])
             step_mesh.apply_transform(np.dot(tr, rot))
             _apply_face_color(step_mesh, stair_color_rgba)
             scene.add_geometry(step_mesh, geom_name=f"stair_{idx}_step_{step_idx}")
-
-        # Top landing to finish the stair run cleanly.
-        landing_len = max(0.55, tread_m * 1.6)
-        landing_x = center_x + (run_m * 0.5 + landing_len * 0.5) * cos_y
-        landing_z = center_z + (run_m * 0.5 + landing_len * 0.5) * sin_y
-        landing_mesh = trimesh.creation.box(extents=(landing_len, step_thickness_m, width_m * 0.98))
-        landing_rot = trimesh.transformations.rotation_matrix(yaw, [0, 1, 0])
-        landing_tr = trimesh.transformations.translation_matrix([landing_x, total_rise_m - step_thickness_m / 2.0, landing_z])
-        landing_mesh.apply_transform(np.dot(landing_tr, landing_rot))
-        _apply_face_color(landing_mesh, stair_color_rgba)
-        scene.add_geometry(landing_mesh, geom_name=f"stair_{idx}_landing")
 
     return scene
 
