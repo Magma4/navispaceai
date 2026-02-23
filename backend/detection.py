@@ -626,6 +626,80 @@ def filter_door_candidates(
     return _dedupe_rect_candidates(out, iou_threshold=0.45)
 
 
+def filter_stair_candidates(
+    stairs: list[StairCandidate],
+    image_shape: tuple[int, int],
+    *,
+    primary_bbox: dict[str, int] | None = None,
+    bbox_margin_px: int = 20,
+    walls: list[WallSegment] | None = None,
+    max_wall_gap_px: float = 26.0,
+    max_candidates: int = 1,
+) -> list[StairCandidate]:
+    """Filter staircase candidates to keep only plausible in-footprint placements.
+
+    This removes most off-footprint false positives and trims noisy extras that
+    can render stairs away from the expected staircase symbol in a blueprint.
+    """
+    if not stairs:
+        return []
+
+    height, width = int(image_shape[0]), int(image_shape[1])
+    if primary_bbox:
+        x0 = max(0, int(primary_bbox.get("x", 0)) - bbox_margin_px)
+        y0 = max(0, int(primary_bbox.get("y", 0)) - bbox_margin_px)
+        x1 = min(width, int(primary_bbox.get("x", 0) + primary_bbox.get("w", width)) + bbox_margin_px)
+        y1 = min(height, int(primary_bbox.get("y", 0) + primary_bbox.get("h", height)) + bbox_margin_px)
+    else:
+        x0, y0, x1, y1 = 0, 0, width, height
+
+    def _point_to_seg_dist(px: float, py: float, seg: WallSegment) -> float:
+        x1s = float(seg["x1"])
+        y1s = float(seg["y1"])
+        x2s = float(seg["x2"])
+        y2s = float(seg["y2"])
+        vx = x2s - x1s
+        vy = y2s - y1s
+        wx = px - x1s
+        wy = py - y1s
+        c1 = vx * wx + vy * wy
+        if c1 <= 0:
+            return math.hypot(px - x1s, py - y1s)
+        c2 = vx * vx + vy * vy
+        if c2 <= 1e-8:
+            return math.hypot(px - x1s, py - y1s)
+        if c1 >= c2:
+            return math.hypot(px - x2s, py - y2s)
+        t = c1 / c2
+        proj_x = x1s + t * vx
+        proj_y = y1s + t * vy
+        return math.hypot(px - proj_x, py - proj_y)
+
+    kept: list[StairCandidate] = []
+    for stair in stairs:
+        if not {"x", "y", "w", "h"}.issubset(stair.keys()):
+            continue
+
+        w = max(1, int(stair["w"]))
+        h = max(1, int(stair["h"]))
+        cx = int(stair["x"] + w / 2)
+        cy = int(stair["y"] + h / 2)
+
+        if not (x0 <= cx <= x1 and y0 <= cy <= y1):
+            continue
+
+        if walls:
+            nearest = min(_point_to_seg_dist(float(cx), float(cy), seg) for seg in walls)
+            if nearest > float(max_wall_gap_px):
+                continue
+
+        kept.append({"x": int(stair["x"]), "y": int(stair["y"]), "w": w, "h": h})
+
+    kept = _dedupe_rect_candidates(kept, iou_threshold=0.4)
+    kept.sort(key=lambda s: int(s["w"]) * int(s["h"]), reverse=True)
+    return kept[: max(1, int(max_candidates))]
+
+
 def detect_doors(
     binary: np.ndarray,
     walls: list[WallSegment] | None = None,

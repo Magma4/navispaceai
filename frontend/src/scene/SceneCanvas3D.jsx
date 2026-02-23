@@ -49,22 +49,8 @@ function FloorModel({ url, elevationM, highlight }) {
       if (name.includes("floor")) return "floor";
       if (name.startsWith("wall_") || name.includes("wall")) return "wall";
 
-      const geometry = mesh.geometry;
-      if (!geometry) return "unknown";
-      if (!geometry.boundingBox) geometry.computeBoundingBox();
-      if (!geometry.boundingBox) return "unknown";
-
-      const size = new THREE.Vector3();
-      geometry.boundingBox.getSize(size);
-      const sy = Math.abs(size.y * mesh.scale.y);
-      const sx = Math.abs(size.x * mesh.scale.x);
-      const sz = Math.abs(size.z * mesh.scale.z);
-      const longSide = Math.max(sx, sz);
-      const shortSide = Math.min(sx, sz);
-
-      if (sy < 0.18 && longSide > 1.25) return "floor";
-      if (sy > 1.65 && sy < 2.5 && shortSide < 0.14 && longSide < 1.5) return "door";
-      if (sy <= 2.0 && shortSide >= 0.2 && shortSide <= 1.4 && longSide >= 0.35 && longSide <= 3.0) return "stair";
+      // No geometry-based semantic fallback for doors/stairs.
+      // It causes false positives on generic wall meshes and paints extra stairs.
       return "unknown";
     };
 

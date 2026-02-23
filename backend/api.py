@@ -30,6 +30,7 @@ from backend.detection import (
     detect_walls,
     extract_walls_from_mask,
     filter_door_candidates,
+    filter_stair_candidates,
     filter_wall_segments,
     merge_collinear_wall_segments,
 )
@@ -435,6 +436,15 @@ def create_app() -> FastAPI:
                 prefer_ml_only=bool(pre.get("ml_used")),
             )
             stairs = detect_staircases(pre["denoised"])
+            stairs = filter_stair_candidates(
+                stairs,
+                pre["gray"].shape,
+                primary_bbox=pre.get("primary_bbox"),
+                bbox_margin_px=max(18, int(min(pre["gray"].shape) * 0.015)),
+                walls=walls,
+                max_wall_gap_px=28.0,
+                max_candidates=1,
+            )
             doors = filter_door_candidates(
                 doors,
                 pre["gray"].shape,
@@ -652,6 +662,15 @@ def create_app() -> FastAPI:
                     prefer_ml_only=bool(pre.get("ml_used")),
                 )
                 stairs = detect_staircases(pre["denoised"])
+                stairs = filter_stair_candidates(
+                    stairs,
+                    pre["gray"].shape,
+                    primary_bbox=pre.get("primary_bbox"),
+                    bbox_margin_px=max(18, int(min(pre["gray"].shape) * 0.015)),
+                    walls=walls,
+                    max_wall_gap_px=28.0,
+                    max_candidates=1,
+                )
                 doors = filter_door_candidates(
                     doors,
                     pre["gray"].shape,

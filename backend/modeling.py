@@ -245,18 +245,51 @@ def extrude_walls_to_scene(
         _apply_face_color(wall_mesh, wall_color_rgba)
         scene.add_geometry(wall_mesh, geom_name=f"wall_raster_{idx}")
 
-    def _segment_midpoint_in_stairs(seg: WallSegment) -> bool:
+    def _segment_overlaps_stairs(seg: WallSegment) -> bool:
         if not stair_rects:
             return False
-        mx = 0.5 * (float(seg["x1"]) + float(seg["x2"]))
-        my = 0.5 * (float(seg["y1"]) + float(seg["y2"]))
+
+        x1 = float(seg["x1"])
+        y1 = float(seg["y1"])
+        x2 = float(seg["x2"])
+        y2 = float(seg["y2"])
+        mx = 0.5 * (x1 + x2)
+        my = 0.5 * (y1 + y2)
+
+        seg_min_x = min(x1, x2)
+        seg_max_x = max(x1, x2)
+        seg_min_y = min(y1, y2)
+        seg_max_y = max(y1, y2)
+
         for stair in stair_rects:
             sx = float(stair["x"])
             sy = float(stair["y"])
             sw = max(1.0, float(stair["w"]))
             sh = max(1.0, float(stair["h"]))
-            if sx <= mx <= sx + sw and sy <= my <= sy + sh:
+
+            # Expand slightly so wall strips touching the stairwell edge are removed.
+            pad = 4.0
+            rx0 = sx - pad
+            ry0 = sy - pad
+            rx1 = sx + sw + pad
+            ry1 = sy + sh + pad
+
+            # Fast reject via AABB overlap.
+            if seg_max_x < rx0 or seg_min_x > rx1 or seg_max_y < ry0 or seg_min_y > ry1:
+                continue
+
+            # If either endpoint or midpoint lies in the stair rectangle, treat as overlap.
+            if (
+                (rx0 <= x1 <= rx1 and ry0 <= y1 <= ry1)
+                or (rx0 <= x2 <= rx1 and ry0 <= y2 <= ry1)
+                or (rx0 <= mx <= rx1 and ry0 <= my <= ry1)
+            ):
                 return True
+
+            # Collinear strips that pass through the expanded stair AABB should also be removed.
+            # (The AABB overlap above already guarantees close proximity.)
+            return True
+
         return False
 
     # Keep vector walls too; they add directional fidelity on top of raster runs.
@@ -269,7 +302,7 @@ def extrude_walls_to_scene(
         length, angle = _segment_length_and_angle(x1, z1, x2, z2)
         if length <= 0.18:
             continue
-        if _segment_midpoint_in_stairs(seg):
+        if _segment_overlaps_stairs(seg):
             continue
 
         wall_mesh = trimesh.creation.box(extents=(length, wall_height_m, wall_thickness_m))
