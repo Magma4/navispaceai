@@ -75,13 +75,16 @@ export function resolveBackendURL(maybeRelativeURL, baseUrl = BACKEND_BASE_URL) 
  *   model_absolute_url:string
  * }>} Processed payload.
  */
-export async function processBlueprint(file, baseUrl = BACKEND_BASE_URL) {
+export async function processBlueprint(file, baseUrl = BACKEND_BASE_URL, options = {}) {
   if (!file) {
     throw new Error("Blueprint file is required.");
   }
 
   const formData = new FormData();
   formData.append("file", file);
+  if (options?.strictMode) {
+    formData.append("strict_mode", "true");
+  }
 
   const response = await fetch(buildURL(baseUrl, "/process-blueprint"), {
     method: "POST",
@@ -248,6 +251,31 @@ export async function findPath3D(payload, baseUrl = BACKEND_BASE_URL) {
   }
 
   const response = await fetch(buildURL(baseUrl, "/find-path-3d"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    await throwAPIError(response);
+  }
+
+  return response.json();
+}
+
+/**
+ * Fetch backend health status with timeout.
+ *
+ * @param {string} [baseUrl=BACKEND_BASE_URL]
+ * @param {{timeoutMs?:number}} [options]
+ * @returns {Promise<{status:string, [key:string]:any}>}
+ */
+export async function submitAnnotationFeedback(payload, baseUrl = BACKEND_BASE_URL) {
+  if (!payload || typeof payload !== "object") {
+    throw new Error("Feedback payload is required.");
+  }
+
+  const response = await fetch(buildURL(baseUrl, "/feedback/annotations"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),

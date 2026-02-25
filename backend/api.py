@@ -147,6 +147,17 @@ class Path3DResponse(BaseModel):
     world_path: list[dict[str, float]]
 
 
+class AnnotationFeedback(BaseModel):
+    """User correction payload for active-learning style dataset growth."""
+
+    source_image: str | None = None
+    strict_mode: bool | None = None
+    notes: str | None = None
+    walls: list[dict[str, int]] = Field(default_factory=list)
+    doors: list[dict[str, int]] = Field(default_factory=list)
+    stairs: list[dict[str, int]] = Field(default_factory=list)
+
+
 def _decode_upload_image(raw_bytes: bytes) -> np.ndarray:
     """Decode uploaded bytes into an OpenCV BGR image."""
     if not raw_bytes:
@@ -157,6 +168,20 @@ def _decode_upload_image(raw_bytes: bytes) -> np.ndarray:
     if image is None:
         raise ValueError("Unsupported or corrupted image format")
     return image
+
+
+def _validate_upload_file(upload: UploadFile, raw_bytes: bytes, *, max_mb: int = 20) -> None:
+    """Validate upload metadata/size before decode for robust API behavior."""
+    if not upload.filename:
+        raise ValueError("No file name provided")
+
+    content_type = str(upload.content_type or "").lower()
+    if content_type and not content_type.startswith("image/"):
+        raise ValueError(f"Unsupported content type: {content_type}")
+
+    max_bytes = int(max_mb) * 1024 * 1024
+    if len(raw_bytes) > max_bytes:
+        raise ValueError(f"File too large (>{max_mb} MB)")
 
 
 def _safe_stem(value: str) -> str:
@@ -390,6 +415,52 @@ def _write_detection_overlay(
     return f"/generated/debug/{out_name}"
 
 
+def _write_debug_bundle(
+    pre: dict[str, Any],
+    walls: list[dict[str, int]],
+    doors: list[dict[str, int]],
+    stairs: list[dict[str, int]],
+    tag: str,
+    strict_mode: bool = False,
+) -> dict[str, Any]:
+    """Write intermediate detection artifacts for quick tuning/debugging."""
+    debug_dir = Path("backend/generated/debug")
+    debug_dir.mkdir(parents=True, exist_ok=True)
+
+    def _save_img(name: str, img: np.ndarray) -> str:
+        path = debug_dir / f"{name}_{tag}.png"
+        cv2.imwrite(str(path), img)
+        return f"/generated/debug/{path.name}"
+
+    gray = pre["gray"]
+    denoised = pre["denoised"]
+    edges = pre["edges"]
+    door_mask = pre.get("door_mask", np.zeros_like(gray, dtype=np.uint8))
+
+    urls = {
+        "gray_url": _save_img("gray", gray),
+        "wall_mask_url": _save_img("wall_mask", denoised),
+        "edges_url": _save_img("edges", edges),
+        "door_mask_url": _save_img("door_mask", door_mask),
+        "overlay_url": _write_detection_overlay(gray, walls, doors, stairs, tag),
+    }
+
+    stats = {
+        "wall_count": len(walls),
+        "door_count": len(doors),
+        "stair_count": len(stairs),
+        "gray_shape": [int(gray.shape[0]), int(gray.shape[1])],
+        "ml_used": bool(pre.get("ml_used")),
+        "ml_device": pre.get("ml_device"),
+        "ml_reason": pre.get("ml_reason"),
+        "strict_mode": bool(strict_mode),
+    }
+    stats_path = debug_dir / f"stats_{tag}.json"
+    stats_path.write_text(json.dumps(stats, indent=2), encoding="utf-8")
+    urls["stats_url"] = f"/generated/debug/{stats_path.name}"
+    return urls
+
+
 def create_app() -> FastAPI:
     """Create and configure the FastAPI application."""
     ensure_directories()
@@ -447,17 +518,24 @@ def create_app() -> FastAPI:
         }
 
     @app.post("/process-blueprint")
-    async def process_blueprint(file: UploadFile = File(...)) -> dict:
+    async def process_blueprint(
+        file: UploadFile = File(...),
+        strict_mode: bool = Form(default=False),
+    ) -> dict:
         """Process one uploaded blueprint and return 2D occupancy + model metadata."""
-        if not file.filename:
-            raise HTTPException(status_code=400, detail="No file name provided")
-
         try:
             raw = await file.read()
+            _validate_upload_file(file, raw, max_mb=20)
             image = _decode_upload_image(raw)
 
             pre = preprocess_blueprint(image)
             hough_threshold, hough_min_len, hough_max_gap = adaptive_hough_params(pre["gray"].shape)
+
+            if strict_mode:
+                hough_threshold = int(round(hough_threshold * 1.12))
+                hough_min_len = int(round(hough_min_len * 1.15))
+                hough_max_gap = max(1, int(round(hough_max_gap * 0.75)))
+
             hough_walls = detect_walls(
                 pre["edges"],
                 threshold=hough_threshold,
@@ -472,8 +550,8 @@ def create_app() -> FastAPI:
                 primary_bbox=pre.get("primary_bbox"),
                 bbox_margin_px=max(18, int(min(pre["gray"].shape) * 0.015)),
                 support_mask=pre.get("denoised"),
-                min_support_ratio=0.1 if bool(pre.get("ml_used")) else 0.2,
-                min_median_half_thickness_px=0.85 if bool(pre.get("ml_used")) else 1.2,
+                min_support_ratio=(0.16 if bool(pre.get("ml_used")) else 0.28) if strict_mode else (0.1 if bool(pre.get("ml_used")) else 0.2),
+                min_median_half_thickness_px=(1.0 if bool(pre.get("ml_used")) else 1.35) if strict_mode else (0.85 if bool(pre.get("ml_used")) else 1.2),
             )
             walls = merge_collinear_wall_segments(walls)
             doors = detect_doors(
@@ -489,8 +567,9 @@ def create_app() -> FastAPI:
                 primary_bbox=pre.get("primary_bbox"),
                 bbox_margin_px=max(18, int(min(pre["gray"].shape) * 0.015)),
                 walls=walls,
-                max_wall_gap_px=28.0,
-                max_candidates=4,
+                max_wall_gap_px=22.0 if strict_mode else 28.0,
+                max_candidates=2 if strict_mode else 4,
+                min_relative_score=0.84 if strict_mode else 0.72,
             )
             doors = filter_door_candidates(
                 doors,
@@ -499,7 +578,8 @@ def create_app() -> FastAPI:
                 bbox_margin_px=max(18, int(min(pre["gray"].shape) * 0.015)),
                 walls=walls,
                 staircase_candidates=stairs,
-                max_wall_gap_px=26.0,
+                max_wall_gap_px=20.0 if strict_mode else 26.0,
+                max_stair_overlap_ratio=0.2 if strict_mode else 0.3,
             )
             grid, _ = walls_to_occupancy_grid(
                 image_shape=pre["gray"].shape,
@@ -511,7 +591,7 @@ def create_app() -> FastAPI:
             )
 
             ts = int(time.time() * 1000)
-            debug_overlay_url = _write_detection_overlay(pre["gray"], walls, doors, stairs, str(ts))
+            debug_bundle = _write_debug_bundle(pre, walls, doors, stairs, str(ts), strict_mode=strict_mode)
             grid_path = f"backend/generated/grids/grid_{ts}.json"
             export_grid_json(
                 grid_path,
@@ -531,6 +611,7 @@ def create_app() -> FastAPI:
                 door_candidates=doors,
                 staircase_candidates=stairs,
                 wall_mask=pre.get("denoised"),
+                use_simple_stair_mesh=False,
             )
 
             STATE.grid = grid
@@ -554,7 +635,9 @@ def create_app() -> FastAPI:
                 "cell_size_m": STATE.cell_size_m,
                 "model_url": STATE.model_url,
                 "grid_url": f"/generated/grids/{Path(grid_path).name}",
-                "debug_overlay_url": debug_overlay_url,
+                "debug": debug_bundle,
+                "debug_overlay_url": debug_bundle.get("overlay_url"),
+                "strict_mode": bool(strict_mode),
                 "ml_used": bool(pre.get("ml_used")),
                 "ml_enabled": bool(pre.get("ml_enabled")),
                 "ml_engine_loaded": bool(pre.get("ml_engine_loaded")),
@@ -671,11 +754,10 @@ def create_app() -> FastAPI:
             floor_artifacts: dict[int, dict[str, Any]] = {}
 
             for idx, upload in enumerate(files):
-                if not upload.filename:
-                    raise ValueError(f"File at index {idx} has no filename")
-
                 floor_number = parsed_floor_numbers[idx]
-                image = _decode_upload_image(await upload.read())
+                raw = await upload.read()
+                _validate_upload_file(upload, raw, max_mb=24)
+                image = _decode_upload_image(raw)
 
                 floor_meta = manager.process_floor_blueprint(
                     floor_number=floor_number,
@@ -747,6 +829,7 @@ def create_app() -> FastAPI:
                     door_candidates=doors,
                     staircase_candidates=stairs,
                     wall_mask=pre.get("denoised"),
+                    use_simple_stair_mesh=False,
                 )
                 floor_meta.model_url = f"/generated/models/{model_filename}"
 
@@ -892,6 +975,37 @@ def create_app() -> FastAPI:
             "goal_room_id": goal_room_id,
             "room_route": route,
             "hops": max(0, len(route) - 1),
+        }
+
+    @app.post("/feedback/annotations")
+    async def submit_annotation_feedback(payload: AnnotationFeedback) -> dict[str, Any]:
+        """Persist user-corrected detections for future model training/tuning."""
+        ts = int(time.time() * 1000)
+        feedback_dir = Path("backend/generated/feedback")
+        feedback_dir.mkdir(parents=True, exist_ok=True)
+
+        record = {
+            "timestamp_ms": ts,
+            "source_image": payload.source_image,
+            "strict_mode": payload.strict_mode,
+            "notes": payload.notes,
+            "walls": payload.walls,
+            "doors": payload.doors,
+            "stairs": payload.stairs,
+        }
+
+        # JSONL appends are simple and training-pipeline friendly.
+        jsonl_path = feedback_dir / "annotations.jsonl"
+        with jsonl_path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+        snapshot_path = feedback_dir / f"annotation_{ts}.json"
+        snapshot_path.write_text(json.dumps(record, indent=2), encoding="utf-8")
+
+        return {
+            "message": "Feedback saved",
+            "record_url": f"/generated/feedback/{snapshot_path.name}",
+            "stream_url": "/generated/feedback/annotations.jsonl",
         }
 
     @app.post("/find-path-3d", response_model=Path3DResponse)

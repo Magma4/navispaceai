@@ -7,11 +7,60 @@ NavispaceAI is an end-to-end indoor navigation platform:
 
 ## Architecture
 
-```text
-Blueprint(s) -> CV preprocessing -> Wall/Room extraction -> Occupancy grid(s)
-              -> Multi-floor building model -> 3D A* pathfinding -> FastAPI APIs
-              -> React + Three.js scene -> Autonomous agent + camera follow
+### High-level system map
+
+```mermaid
+flowchart LR
+  A[Blueprint Upload UI\nReact] --> B[FastAPI /process-blueprint|/process-building]
+  B --> C[Preprocessing\nclassical CV + optional ML masks]
+  C --> D[Detection\nwalls + doors + stairs]
+  D --> E[Filtering + Merge\nstrict/non-strict modes]
+  E --> F[Occupancy Grids\n2D + normalized 3D]
+  E --> G[3D Modeling\nGLB export]
+  F --> H[Pathfinding\nA* 2D + 3D]
+  G --> I[Generated Assets\n/backend/generated]
+  H --> J[Navigation APIs]
+  I --> K[Three.js Runtime]
+  J --> K
+  K --> L[Agent Motion + Camera Follow]
+  K --> M[Feedback UI]
+  M --> N[/feedback/annotations\nJSONL dataset growth]
 ```
+
+### Backend architecture (module-level)
+
+```text
+backend/
+  api.py                # HTTP contracts + orchestration + response shaping
+  preprocessing.py      # image normalization + wall mask fusion (CV/ML)
+  detection.py          # wall/door/stair detectors + geometric filters
+  grid.py / grid3D.py   # occupancy rasterization + multi-floor normalization
+  pathfinding*.py       # A* path search in 2D and 3D
+  modeling.py           # geometry extrusion + GLB generation
+  building_manager.py   # floor/room/connectors semantic model
+  scene_graph.py        # BIM-style scene graph assembly
+  geometry_validation.py# quality checks for intersections/clearance
+  ml/                   # train/infer stack for wall+door segmentation
+```
+
+### Runtime data flow
+
+1. Frontend uploads one or many blueprint images.
+2. Backend preprocesses image(s), optionally fusing ML segmentation masks.
+3. Detection + filtering produce walls/doors/stairs.
+4. Occupancy grid + GLB model are generated and persisted.
+5. Frontend loads GLB and queries path APIs for navigation.
+6. Feedback endpoint captures corrected annotations for retraining.
+
+### Error handling strategy (current)
+
+- Input guardrails: file type, max size, empty/corrupt image checks.
+- Endpoint-level typed errors:
+  - `400` invalid input/query
+  - `404` no path / missing resource
+  - `500` unexpected runtime faults
+- ML fallback: if checkpoint/device/runtime fails, pipeline degrades to classical CV.
+- Debug observability: `/generated/debug/*` artifacts + per-run stats JSON.
 
 ## Production Deployment (Docker)
 
@@ -169,6 +218,7 @@ Then restart backend. If model is unavailable, backend automatically falls back 
 - `GET /rooms` (extended room index metadata)
 - `POST /find-path-3d` (extended 3D path in meters)
 - `POST /process-building` (extended multi-floor ingestion)
+- `POST /feedback/annotations` (active-learning feedback capture)
 
 ## Testing
 

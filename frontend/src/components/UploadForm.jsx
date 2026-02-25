@@ -20,6 +20,7 @@ export default function UploadForm({
   const [files, setFiles] = useState([]);
   const [previewUrl, setPreviewUrl] = useState("");
   const [loading, setLoading] = useState(false);
+  const [strictMode, setStrictMode] = useState(true);
 
   useEffect(() => {
     if (!files.length) {
@@ -64,9 +65,13 @@ export default function UploadForm({
           backendBaseUrl
         );
       } else {
-        result = await processBlueprint(files[0], backendBaseUrl);
+        result = await processBlueprint(files[0], backendBaseUrl, { strictMode });
       }
-      onProcessed?.(result);
+      onProcessed?.({
+        ...result,
+        source_image: files[0]?.name || null,
+        strict_mode: files.length > 1 ? false : Boolean(result?.strict_mode ?? strictMode),
+      });
       onNotify?.(
         files.length > 1
           ? `Processed ${files.length} floors successfully.`
@@ -86,6 +91,13 @@ export default function UploadForm({
       <h2>Upload Blueprint</h2>
       <p className="muted">Upload a clean PNG/JPG blueprint to generate a navigable 3D model.</p>
 
+      <div className="workflow-steps" aria-label="Processing workflow">
+        <span className="workflow-step is-active">1. Upload</span>
+        <span className="workflow-step">2. Detect</span>
+        <span className="workflow-step">3. Render</span>
+        <span className="workflow-step">4. Validate</span>
+      </div>
+
       <label className="file-input" htmlFor="blueprint-file">
         <span>Blueprint Image</span>
         <input
@@ -97,6 +109,16 @@ export default function UploadForm({
           disabled={loading}
           aria-label="Select blueprint image"
         />
+      </label>
+
+      <label className="follow-toggle" style={{ marginTop: 4 }}>
+        <input
+          type="checkbox"
+          checked={strictMode}
+          onChange={(event) => setStrictMode(Boolean(event.target.checked))}
+          disabled={loading || files.length > 1}
+        />
+        <span>Strict detection mode (recommended for noisy blueprints)</span>
       </label>
 
       <div className="file-meta" aria-live="polite">
@@ -119,7 +141,7 @@ export default function UploadForm({
 
       <button
         type="button"
-        className="btn btn-primary"
+        className="btn btn-primary btn-cta"
         onClick={handleProcessClick}
         disabled={!files.length || loading}
         aria-disabled={!files.length || loading}

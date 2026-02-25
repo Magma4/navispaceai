@@ -606,9 +606,9 @@ def filter_door_candidates(
         darea = float(dw * dh)
         dshort = float(min(dw, dh))
         dlong = float(max(dw, dh))
-        if darea < 90.0 or darea > 3000.0:
+        if darea < 75.0 or darea > 3000.0:
             continue
-        if not (6.0 <= dshort <= 28.0 and 12.0 <= dlong <= 120.0):
+        if not (6.0 <= dshort <= 28.0 and 10.0 <= dlong <= 120.0):
             continue
 
         cx = int(door["x"] + dw / 2)

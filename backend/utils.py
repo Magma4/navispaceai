@@ -19,6 +19,7 @@ def ensure_directories() -> None:
     Path("backend/generated/models").mkdir(parents=True, exist_ok=True)
     Path("backend/generated/grids").mkdir(parents=True, exist_ok=True)
     Path("backend/generated/debug").mkdir(parents=True, exist_ok=True)
+    Path("backend/generated/feedback").mkdir(parents=True, exist_ok=True)
 
 
 def to_serializable_path(path: Iterable[tuple[int, int]]) -> list[dict[str, int]]:

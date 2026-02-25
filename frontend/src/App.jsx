@@ -8,6 +8,7 @@ import {
   BACKEND_BASE_URL,
   fetchBackendHealth,
   resolveBackendURL,
+  submitAnnotationFeedback,
 } from "./api/backendAPI";
 import { buildGameURL } from "./utils/game-url";
 
@@ -152,6 +153,8 @@ export default function App() {
   });
   const [toast, setToast] = useState({ message: null, type: "info" });
   const [showStudioDetails, setShowStudioDetails] = useState(false);
+  const [feedbackNotes, setFeedbackNotes] = useState("");
+  const [feedbackSending, setFeedbackSending] = useState(false);
 
   const recentSignatureRef = useRef("");
 
@@ -404,6 +407,34 @@ export default function App() {
     window.open(gameUrl, "_blank", "noopener,noreferrer");
   }
 
+  async function submitCurrentFeedback() {
+    if (!projectMeta || projectMeta.mode === "multi") {
+      showToast("Feedback capture is currently available for single-floor outputs.", "info");
+      return;
+    }
+
+    setFeedbackSending(true);
+    try {
+      await submitAnnotationFeedback(
+        {
+          source_image: projectMeta.source_image || null,
+          strict_mode: Boolean(projectMeta.strict_mode),
+          notes: feedbackNotes || null,
+          walls: Array.isArray(projectMeta.walls) ? projectMeta.walls : [],
+          doors: Array.isArray(projectMeta.doors) ? projectMeta.doors : [],
+          stairs: Array.isArray(projectMeta.stairs) ? projectMeta.stairs : [],
+        },
+        normalizedBackendUrl || BACKEND_BASE_URL
+      );
+      showToast("Annotation feedback saved for model improvement.", "success");
+      setFeedbackNotes("");
+    } catch (error) {
+      showToast(error?.message || "Failed to submit feedback.", "error");
+    } finally {
+      setFeedbackSending(false);
+    }
+  }
+
   /**
    * Scroll to build studio section.
    */
@@ -523,6 +554,15 @@ export default function App() {
               <span>Build Quality</span>
               <code>{projectMeta ? `${quality.label} (${quality.score}/100)` : "Pending"}</code>
             </div>
+            <div className="quality-meter" aria-label="Build quality meter">
+              <div className="quality-meter-track">
+                <div
+                  className={`quality-meter-fill ${quality.score >= 82 ? "is-strong" : quality.score >= 64 ? "is-good" : "is-review"}`}
+                  style={{ width: `${Math.max(6, Math.min(100, quality.score || 0))}%` }}
+                />
+              </div>
+              <small className="muted">Target: 82+ for production-grade confidence</small>
+            </div>
           </section>
 
           <section className="panel studio-toggle-card" aria-label="Studio details toggle">
@@ -618,8 +658,39 @@ export default function App() {
                     <code>{item.ok ? `PASS · ${item.detail}` : `REVIEW · ${item.detail}`}</code>
                   </div>
                 ))}
+                <div className="kv">
+                  <span>Strict Mode</span>
+                  <code>{projectMeta.strict_mode ? "Enabled" : "Disabled"}</code>
+                </div>
               </>
             )}
+          </section>
+
+          <section className="panel" aria-label="Annotation feedback">
+            <h2>AI Feedback Loop</h2>
+            <p className="muted">
+              Save current detections as feedback for model retraining and robustness tuning.
+            </p>
+            <label className="field-group" htmlFor="feedback-notes">
+              <span className="muted">Notes (optional)</span>
+              <textarea
+                id="feedback-notes"
+                value={feedbackNotes}
+                onChange={(event) => setFeedbackNotes(event.target.value)}
+                placeholder="e.g. stairs false positive near lobby, east wall fragmented"
+                rows={3}
+              />
+            </label>
+            <div className="action-row">
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={submitCurrentFeedback}
+                disabled={!projectMeta || projectMeta.mode === "multi" || feedbackSending}
+              >
+                {feedbackSending ? "Saving feedback..." : "Submit Current Detections as Feedback"}
+              </button>
+            </div>
           </section>
 
           <BIMDiagnosticsPanel projectMeta={projectMeta} />

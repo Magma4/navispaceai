@@ -83,6 +83,33 @@ def _compute_wall_bounds_m(
     return min(xs), max(xs), min(zs), max(zs)
 
 
+def _segment_support_in_mask(seg: WallSegment, mask: np.ndarray, samples: int = 28) -> float:
+    """Estimate what fraction of a segment lies on non-zero mask pixels."""
+    if mask is None or mask.size == 0:
+        return 0.0
+    h, w = mask.shape[:2]
+    x1 = float(seg["x1"])
+    y1 = float(seg["y1"])
+    x2 = float(seg["x2"])
+    y2 = float(seg["y2"])
+
+    total = 0
+    hit = 0
+    for i in range(max(2, int(samples))):
+        t = i / max(1, samples - 1)
+        x = int(round(x1 + (x2 - x1) * t))
+        y = int(round(y1 + (y2 - y1) * t))
+        if x < 0 or y < 0 or x >= w or y >= h:
+            continue
+        total += 1
+        if int(mask[y, x]) > 0:
+            hit += 1
+
+    if total == 0:
+        return 0.0
+    return float(hit) / float(total)
+
+
 def _raster_wall_run_meshes(
     wall_mask: np.ndarray,
     *,
@@ -102,6 +129,9 @@ def _raster_wall_run_meshes(
         (max(1, wall_mask.shape[1] // down), max(1, wall_mask.shape[0] // down)),
         interpolation=cv2.INTER_NEAREST,
     )
+    # Bridge tiny gaps so long walls don't render as broken fragments.
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+    resized = cv2.morphologyEx(resized, cv2.MORPH_CLOSE, kernel, iterations=1)
     scale = model_scale_m_per_px * down
 
     meshes: list[trimesh.Trimesh] = []
@@ -171,6 +201,8 @@ def extrude_walls_to_scene(
     wall_color_rgba: tuple[int, int, int, int] = (88, 95, 108, 255),
     door_color_rgba: tuple[int, int, int, int] = (230, 120, 40, 255),
     stair_color_rgba: tuple[int, int, int, int] = (78, 170, 255, 255),
+    use_simple_stair_mesh: bool = True,
+    render_door_meshes: bool = False,
 ) -> trimesh.Scene:
     """Convert 2D wall line segments into a trimesh scene.
 
@@ -304,7 +336,8 @@ def extrude_walls_to_scene(
                 return True
         return False
 
-    # Keep vector walls too; they add directional fidelity on top of raster runs.
+    # Keep vector walls for directional fidelity, but avoid duplicating walls
+    # already well-covered by raster runs.
     for idx, seg in enumerate(walls):
         x1 = seg["x1"] * model_scale_m_per_px
         z1 = seg["y1"] * model_scale_m_per_px
@@ -316,6 +349,13 @@ def extrude_walls_to_scene(
             continue
         if _segment_overlaps_stairs(seg):
             continue
+
+        # Conflict resolver: if raster wall mask already strongly supports this segment,
+        # skip vector duplicate to prevent over-thick/double walls.
+        if wall_mask_for_mesh is not None and wall_mask_for_mesh.size > 0:
+            support = _segment_support_in_mask(seg, wall_mask_for_mesh)
+            if support >= 0.72:
+                continue
 
         wall_mesh = trimesh.creation.box(extents=(length, wall_height_m, wall_thickness_m))
 
@@ -330,40 +370,41 @@ def extrude_walls_to_scene(
 
         scene.add_geometry(wall_mesh, geom_name=f"wall_vec_{idx}")
 
-    # Add door leaves with a slight open angle for clear visual semantics.
-    for idx, door in enumerate(door_candidates or []):
-        if not {"x", "y", "w", "h"}.issubset(door.keys()):
-            continue
+    # Optional door meshes. Disabled by default to avoid orange stub artifacts.
+    if render_door_meshes:
+        for idx, door in enumerate(door_candidates or []):
+            if not {"x", "y", "w", "h"}.issubset(door.keys()):
+                continue
 
-        door_w_px = max(1.0, float(door["w"]))
-        door_h_px = max(1.0, float(door["h"]))
-        center_x_px = float(door["x"]) + door_w_px / 2.0
-        center_z_px = float(door["y"]) + door_h_px / 2.0
+            door_w_px = max(1.0, float(door["w"]))
+            door_h_px = max(1.0, float(door["h"]))
+            center_x_px = float(door["x"]) + door_w_px / 2.0
+            center_z_px = float(door["y"]) + door_h_px / 2.0
 
-        center_x = center_x_px * model_scale_m_per_px
-        center_z = center_z_px * model_scale_m_per_px
+            center_x = center_x_px * model_scale_m_per_px
+            center_z = center_z_px * model_scale_m_per_px
 
-        clear_width_m = max(0.82, min(1.15, max(door_w_px, door_h_px) * model_scale_m_per_px))
-        leaf_width_m = clear_width_m * 0.9
-        door_height_m = min(2.15, max(1.98, wall_height_m * 0.74))
-        door_thickness_m = min(0.05, wall_thickness_m * 0.35)
+            clear_width_m = max(0.82, min(1.15, max(door_w_px, door_h_px) * model_scale_m_per_px))
+            leaf_width_m = clear_width_m * 0.9
+            door_height_m = min(2.15, max(1.98, wall_height_m * 0.74))
+            door_thickness_m = min(0.05, wall_thickness_m * 0.35)
 
-        # Orient along longer axis of detected door bbox and rotate leaf open.
-        base_yaw = 0.0 if door_w_px >= door_h_px else math.pi / 2.0
-        open_yaw = math.radians(52.0)
+            # Orient along longer axis of detected door bbox and rotate leaf open.
+            base_yaw = 0.0 if door_w_px >= door_h_px else math.pi / 2.0
+            open_yaw = math.radians(52.0)
 
-        # Hinge offset from opening center so the leaf appears to swing.
-        hx = center_x - (clear_width_m * 0.45) * math.cos(base_yaw)
-        hz = center_z - (clear_width_m * 0.45) * math.sin(base_yaw)
+            # Hinge offset from opening center so the leaf appears to swing.
+            hx = center_x - (clear_width_m * 0.45) * math.cos(base_yaw)
+            hz = center_z - (clear_width_m * 0.45) * math.sin(base_yaw)
 
-        door_leaf = trimesh.creation.box(extents=(leaf_width_m, door_height_m, door_thickness_m))
-        rot_base = trimesh.transformations.rotation_matrix(base_yaw + open_yaw, [0, 1, 0])
-        tr = trimesh.transformations.translation_matrix([hx, door_height_m / 2.0, hz])
-        door_leaf.apply_transform(np.dot(tr, rot_base))
-        _apply_face_color(door_leaf, door_color_rgba)
-        scene.add_geometry(door_leaf, geom_name=f"door_{idx}")
+            door_leaf = trimesh.creation.box(extents=(leaf_width_m, door_height_m, door_thickness_m))
+            rot_base = trimesh.transformations.rotation_matrix(base_yaw + open_yaw, [0, 1, 0])
+            tr = trimesh.transformations.translation_matrix([hx, door_height_m / 2.0, hz])
+            door_leaf.apply_transform(np.dot(tr, rot_base))
+            _apply_face_color(door_leaf, door_color_rgba)
+            scene.add_geometry(door_leaf, geom_name=f"door_{idx}")
 
-    # Add staircase as repeated steps (instead of one block) for realism.
+    # Stair meshes: default to simple block for stability while detection quality improves.
     for idx, stair in enumerate(staircase_candidates or []):
         if not {"x", "y", "w", "h"}.issubset(stair.keys()):
             continue
@@ -379,7 +420,17 @@ def extrude_walls_to_scene(
         width_m = max(0.8, min(stair_w_px, stair_h_px) * model_scale_m_per_px)
         yaw = 0.0 if stair_w_px >= stair_h_px else math.pi / 2.0
 
-        # Legacy stair mesh (stable placeholder while detection is improved).
+        if use_simple_stair_mesh:
+            stair_height_m = min(0.45, max(0.22, wall_height_m * 0.14))
+            stair_mesh = trimesh.creation.box(extents=(run_m * 0.98, stair_height_m, width_m * 0.98))
+            rot = trimesh.transformations.rotation_matrix(yaw, [0, 1, 0])
+            tr = trimesh.transformations.translation_matrix([center_x, stair_height_m / 2.0, center_z])
+            stair_mesh.apply_transform(np.dot(tr, rot))
+            _apply_face_color(stair_mesh, stair_color_rgba)
+            scene.add_geometry(stair_mesh, geom_name=f"stair_{idx}")
+            continue
+
+        # Optional detailed stepped mesh.
         step_count = int(max(5, min(14, round(run_m / 0.28))))
         tread_m = run_m / max(1, step_count)
         riser_m = min(0.18, max(0.12, wall_height_m * 0.05))
@@ -401,7 +452,31 @@ def extrude_walls_to_scene(
             _apply_face_color(step_mesh, stair_color_rgba)
             scene.add_geometry(step_mesh, geom_name=f"stair_{idx}_step_{step_idx}")
 
+    _prune_tiny_scene_geometry(scene, min_xy_extent_m=0.12)
     return scene
+
+
+def _prune_tiny_scene_geometry(scene: trimesh.Scene, min_xy_extent_m: float = 0.12) -> None:
+    """Remove tiny disconnected artifacts that commonly come from noisy detections."""
+    if scene is None:
+        return
+
+    remove_names: list[str] = []
+    for name, geom in scene.geometry.items():
+        # Keep semantic non-wall items; culling targets micro wall artifacts.
+        if not str(name).startswith(("wall_", "wall")):
+            continue
+        bounds = getattr(geom, "bounds", None)
+        if bounds is None or len(bounds) != 2:
+            continue
+        extents = np.asarray(bounds[1]) - np.asarray(bounds[0])
+        if extents.size < 3:
+            continue
+        if float(max(extents[0], extents[2])) < float(min_xy_extent_m):
+            remove_names.append(name)
+
+    for name in remove_names:
+        scene.delete_geometry(name)
 
 
 def export_scene_glb(scene: trimesh.Scene, output_path: str) -> str:
@@ -438,6 +513,7 @@ def build_model_from_walls(
     door_candidates: list[DoorCandidate] | None = None,
     staircase_candidates: list[StairCandidate] | None = None,
     wall_mask: np.ndarray | None = None,
+    use_simple_stair_mesh: bool = False,
 ) -> str:
     """High-level helper to construct and export a 3D model from wall segments.
 
@@ -448,6 +524,8 @@ def build_model_from_walls(
         wall_height_m: Wall extrusion height.
         model_scale_m_per_px: Pixel-to-meter scale.
         door_candidates: Optional detected door boxes.
+        use_simple_stair_mesh: If True, use simple stair block meshes; otherwise
+            export stepped stairs for more realistic geometry.
 
     Returns:
         Exported `.glb` file path.
@@ -460,5 +538,6 @@ def build_model_from_walls(
         door_candidates=door_candidates,
         staircase_candidates=staircase_candidates,
         wall_mask=wall_mask,
+        use_simple_stair_mesh=use_simple_stair_mesh,
     )
     return export_scene_glb(scene, output_path)

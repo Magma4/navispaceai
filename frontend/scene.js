@@ -13,7 +13,8 @@ export class NavScene {
   constructor(container) {
     this.container = container;
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color("#d9e4ec");
+    this.scene.background = new THREE.Color("#e7edf3");
+    this.scene.fog = new THREE.Fog("#e7edf3", 35, 140);
 
     this.camera = new THREE.PerspectiveCamera(
       60,
@@ -26,6 +27,11 @@ export class NavScene {
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
     this.renderer.setPixelRatio(window.devicePixelRatio);
     this.renderer.setSize(container.clientWidth, container.clientHeight);
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.05;
+    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     container.appendChild(this.renderer.domElement);
 
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
@@ -49,14 +55,29 @@ export class NavScene {
 
   /** Build static scene elements: lights, floor helper, and pick plane. */
   _buildEnvironment() {
-    const hemi = new THREE.HemisphereLight(0xffffff, 0x445566, 0.85);
+    const hemi = new THREE.HemisphereLight(0xf2f6fb, 0x6b7480, 0.62);
     this.scene.add(hemi);
 
-    const key = new THREE.DirectionalLight(0xffffff, 1.2);
+    const key = new THREE.DirectionalLight(0xfff9f0, 1.0);
     key.position.set(10, 20, 8);
+    key.castShadow = true;
+    key.shadow.mapSize.set(2048, 2048);
+    key.shadow.camera.near = 0.5;
+    key.shadow.camera.far = 90;
+    key.shadow.camera.left = -30;
+    key.shadow.camera.right = 30;
+    key.shadow.camera.top = 30;
+    key.shadow.camera.bottom = -30;
+    key.shadow.bias = -0.00025;
     this.scene.add(key);
 
-    const grid = new THREE.GridHelper(300, 300, 0x7c8fa3, 0x9ab0c4);
+    const fill = new THREE.DirectionalLight(0xd9e7ff, 0.33);
+    fill.position.set(-12, 11, -8);
+    this.scene.add(fill);
+
+    const grid = new THREE.GridHelper(300, 300, 0xa8b5c2, 0xc2cdd8);
+    grid.material.transparent = true;
+    grid.material.opacity = 0.35;
     this.scene.add(grid);
 
     // Invisible floor plane used for click-to-point raycasting.
@@ -128,7 +149,8 @@ export class NavScene {
     const gltf = await loader.loadAsync(modelUrl);
     this.modelRoot = gltf.scene;
 
-    // Enforce semantic coloring by mesh name so walls/doors/stairs are visually distinct.
+    // Enforce semantic materials by mesh name so walls/doors/stairs are visually distinct
+    // while avoiding neon-like debug colors.
     this.modelRoot.traverse((obj) => {
       if (!obj.isMesh || !obj.material) return;
       const name = String(obj.name || "").toLowerCase();
@@ -141,33 +163,54 @@ export class NavScene {
       else if (name === "floor") kind = "floor";
 
       // IMPORTANT: if kind is unknown, keep GLB material as-is.
-      // Backend already writes semantic colors; forcing a fallback guess was
-      // washing doors/stairs back to wall tone in practice.
       if (!kind) return;
 
-      const palette = {
-        floor: "#c0cbd6",
-        wall: "#5c6d82",
-        door: "#ff7a1a",
-        stair: "#2da4ff",
-      };
-
-      const color = palette[kind];
-      const base = new THREE.MeshStandardMaterial({
-        color,
-        roughness: 0.55,
-        metalness: 0.05,
-        transparent: kind === "door",
-        opacity: kind === "door" ? 0.95 : 1.0,
-      });
-      if (kind === "door" || kind === "stair") {
-        base.emissive = new THREE.Color(color);
-        base.emissiveIntensity = kind === "door" ? 0.28 : 0.16;
+      // Hide tiny accidental door artifacts ("orange stubs") while preserving
+      // real doors that have meaningful footprint/height.
+      if (kind === "door" && obj.geometry) {
+        obj.geometry.computeBoundingBox();
+        const bb = obj.geometry.boundingBox;
+        if (bb) {
+          const sx = Math.max(0, bb.max.x - bb.min.x);
+          const sy = Math.max(0, bb.max.y - bb.min.y);
+          const sz = Math.max(0, bb.max.z - bb.min.z);
+          const footprint = Math.max(sx, sz);
+          if (footprint < 0.42 || sy < 1.55) {
+            obj.visible = false;
+            return;
+          }
+        }
       }
 
+      const materials = {
+        floor: new THREE.MeshStandardMaterial({
+          color: "#c3ccd6",
+          roughness: 0.93,
+          metalness: 0.0,
+        }),
+        wall: new THREE.MeshStandardMaterial({
+          color: "#e4e8ee",
+          roughness: 0.88,
+          metalness: 0.01,
+        }),
+        door: new THREE.MeshStandardMaterial({
+          color: "#6f4a2c",
+          roughness: 0.58,
+          metalness: 0.03,
+        }),
+        stair: new THREE.MeshStandardMaterial({
+          color: "#929eab",
+          roughness: 0.9,
+          metalness: 0.01,
+        }),
+      };
+
+      const base = materials[kind];
       if (Array.isArray(obj.material)) obj.material.forEach((m) => m.dispose());
       else obj.material.dispose();
       obj.material = base;
+      obj.castShadow = true;
+      obj.receiveShadow = true;
     });
 
     this.scene.add(this.modelRoot);
