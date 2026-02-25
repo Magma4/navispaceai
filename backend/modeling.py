@@ -202,7 +202,7 @@ def extrude_walls_to_scene(
     door_color_rgba: tuple[int, int, int, int] = (230, 120, 40, 255),
     stair_color_rgba: tuple[int, int, int, int] = (78, 170, 255, 255),
     use_simple_stair_mesh: bool = True,
-    render_door_meshes: bool = False,
+    render_door_meshes: bool = True,
 ) -> trimesh.Scene:
     """Convert 2D wall line segments into a trimesh scene.
 
@@ -367,10 +367,20 @@ def extrude_walls_to_scene(
         transform = np.dot(translation, rotation)
         wall_mesh.apply_transform(transform)
         _apply_face_color(wall_mesh, wall_color_rgba)
-
         scene.add_geometry(wall_mesh, geom_name=f"wall_vec_{idx}")
 
-    # Optional door meshes. Disabled by default to avoid orange stub artifacts.
+        # Wall top-cap strip for visual depth.
+        cap_height = 0.04
+        cap_mesh = trimesh.creation.box(extents=(length, cap_height, wall_thickness_m * 1.15))
+        cap_rot = trimesh.transformations.rotation_matrix(angle, [0, 1, 0])
+        cap_tr = trimesh.transformations.translation_matrix(
+            [center_x, wall_height_m + cap_height / 2.0, center_z]
+        )
+        cap_mesh.apply_transform(np.dot(cap_tr, cap_rot))
+        _apply_face_color(cap_mesh, (58, 64, 76, 255))  # darker cap
+        scene.add_geometry(cap_mesh, geom_name=f"wall_cap_{idx}")
+
+    # ── Door meshes: frame + hinged leaf ──────────────────────────────
     if render_door_meshes:
         for idx, door in enumerate(door_candidates or []):
             if not {"x", "y", "w", "h"}.issubset(door.keys()):
@@ -384,27 +394,62 @@ def extrude_walls_to_scene(
             center_x = center_x_px * model_scale_m_per_px
             center_z = center_z_px * model_scale_m_per_px
 
-            clear_width_m = max(0.82, min(1.15, max(door_w_px, door_h_px) * model_scale_m_per_px))
-            leaf_width_m = clear_width_m * 0.9
-            door_height_m = min(2.15, max(1.98, wall_height_m * 0.74))
-            door_thickness_m = min(0.05, wall_thickness_m * 0.35)
+            clear_width_m = max(0.78, min(1.30, max(door_w_px, door_h_px) * model_scale_m_per_px))
+            door_height_m = min(2.20, max(2.00, wall_height_m * 0.74))
+            door_thickness_m = 0.045
+            frame_depth_m = 0.06
 
-            # Orient along longer axis of detected door bbox and rotate leaf open.
+            # Orient along longer axis of detected door bbox.
             base_yaw = 0.0 if door_w_px >= door_h_px else math.pi / 2.0
-            open_yaw = math.radians(52.0)
 
-            # Hinge offset from opening center so the leaf appears to swing.
-            hx = center_x - (clear_width_m * 0.45) * math.cos(base_yaw)
-            hz = center_z - (clear_width_m * 0.45) * math.sin(base_yaw)
+            # ── Door frame (thin rectangular outline) ──
+            frame_pieces = [
+                # left jamb
+                (frame_depth_m, door_height_m, frame_depth_m,
+                 center_x - (clear_width_m / 2.0) * math.cos(base_yaw),
+                 door_height_m / 2.0,
+                 center_z - (clear_width_m / 2.0) * math.sin(base_yaw)),
+                # right jamb
+                (frame_depth_m, door_height_m, frame_depth_m,
+                 center_x + (clear_width_m / 2.0) * math.cos(base_yaw),
+                 door_height_m / 2.0,
+                 center_z + (clear_width_m / 2.0) * math.sin(base_yaw)),
+                # top lintel
+                (clear_width_m + frame_depth_m * 2, wall_height_m - door_height_m, frame_depth_m,
+                 center_x,
+                 door_height_m + (wall_height_m - door_height_m) / 2.0,
+                 center_z),
+            ]
+            for fi, (fw, fh, fd, fx, fy, fz) in enumerate(frame_pieces):
+                if fw < 0.01 or fh < 0.01:
+                    continue
+                frame_mesh = trimesh.creation.box(extents=(fw, fh, fd))
+                rot = trimesh.transformations.rotation_matrix(base_yaw, [0, 1, 0])
+                tr = trimesh.transformations.translation_matrix([fx, fy, fz])
+                frame_mesh.apply_transform(np.dot(tr, rot))
+                _apply_face_color(frame_mesh, (62, 50, 38, 255))  # dark wood frame
+                scene.add_geometry(frame_mesh, geom_name=f"door_frame_{idx}_{fi}")
+
+            # ── Door leaf (hinged, open at 45°) ──
+            leaf_width_m = clear_width_m * 0.92
+            open_angle = math.radians(45.0)
+
+            # Hinge at left side of opening.
+            hinge_x = center_x - (clear_width_m * 0.46) * math.cos(base_yaw)
+            hinge_z = center_z - (clear_width_m * 0.46) * math.sin(base_yaw)
+
+            # Leaf centre offset from hinge.
+            leaf_cx = hinge_x + (leaf_width_m * 0.5) * math.cos(base_yaw + open_angle)
+            leaf_cz = hinge_z + (leaf_width_m * 0.5) * math.sin(base_yaw + open_angle)
 
             door_leaf = trimesh.creation.box(extents=(leaf_width_m, door_height_m, door_thickness_m))
-            rot_base = trimesh.transformations.rotation_matrix(base_yaw + open_yaw, [0, 1, 0])
-            tr = trimesh.transformations.translation_matrix([hx, door_height_m / 2.0, hz])
-            door_leaf.apply_transform(np.dot(tr, rot_base))
+            rot_leaf = trimesh.transformations.rotation_matrix(base_yaw + open_angle, [0, 1, 0])
+            tr_leaf = trimesh.transformations.translation_matrix([leaf_cx, door_height_m / 2.0, leaf_cz])
+            door_leaf.apply_transform(np.dot(tr_leaf, rot_leaf))
             _apply_face_color(door_leaf, door_color_rgba)
             scene.add_geometry(door_leaf, geom_name=f"door_{idx}")
 
-    # Stair meshes: default to simple block for stability while detection quality improves.
+    # ── Stair meshes: stepped treads + side stringers ─────────────────
     for idx, stair in enumerate(staircase_candidates or []):
         if not {"x", "y", "w", "h"}.issubset(stair.keys()):
             continue
@@ -420,37 +465,45 @@ def extrude_walls_to_scene(
         width_m = max(0.8, min(stair_w_px, stair_h_px) * model_scale_m_per_px)
         yaw = 0.0 if stair_w_px >= stair_h_px else math.pi / 2.0
 
-        if use_simple_stair_mesh:
-            stair_height_m = min(0.45, max(0.22, wall_height_m * 0.14))
-            stair_mesh = trimesh.creation.box(extents=(run_m * 0.98, stair_height_m, width_m * 0.98))
-            rot = trimesh.transformations.rotation_matrix(yaw, [0, 1, 0])
-            tr = trimesh.transformations.translation_matrix([center_x, stair_height_m / 2.0, center_z])
-            stair_mesh.apply_transform(np.dot(tr, rot))
-            _apply_face_color(stair_mesh, stair_color_rgba)
-            scene.add_geometry(stair_mesh, geom_name=f"stair_{idx}")
-            continue
-
-        # Optional detailed stepped mesh.
-        step_count = int(max(5, min(14, round(run_m / 0.28))))
+        # Calculate step geometry.
+        step_count = int(max(6, min(16, round(run_m / 0.26))))
         tread_m = run_m / max(1, step_count)
-        riser_m = min(0.18, max(0.12, wall_height_m * 0.05))
+        riser_m = min(0.19, max(0.13, wall_height_m / max(1, step_count * 1.2)))
+        cos_y, sin_y = math.cos(yaw), math.sin(yaw)
 
         start_offset = -run_m * 0.5 + tread_m * 0.5
-        cos_y, sin_y = math.cos(yaw), math.sin(yaw)
 
         for step_idx in range(step_count):
             local_x = start_offset + step_idx * tread_m
-            local_z = 0.0
-            world_x = center_x + local_x * cos_y - local_z * sin_y
-            world_z = center_z + local_x * sin_y + local_z * cos_y
+            world_x = center_x + local_x * cos_y
+            world_z = center_z + local_x * sin_y
             step_h = riser_m * (step_idx + 1)
 
-            step_mesh = trimesh.creation.box(extents=(tread_m * 0.95, step_h, width_m * 0.96))
+            # Tread (horizontal surface).
+            tread_mesh = trimesh.creation.box(extents=(tread_m * 0.96, riser_m, width_m * 0.96))
             rot = trimesh.transformations.rotation_matrix(yaw, [0, 1, 0])
-            tr = trimesh.transformations.translation_matrix([world_x, step_h / 2.0, world_z])
-            step_mesh.apply_transform(np.dot(tr, rot))
-            _apply_face_color(step_mesh, stair_color_rgba)
-            scene.add_geometry(step_mesh, geom_name=f"stair_{idx}_step_{step_idx}")
+            tr = trimesh.transformations.translation_matrix([world_x, step_h - riser_m / 2.0, world_z])
+            tread_mesh.apply_transform(np.dot(tr, rot))
+            _apply_face_color(tread_mesh, stair_color_rgba)
+            scene.add_geometry(tread_mesh, geom_name=f"stair_{idx}_tread_{step_idx}")
+
+        # Side stringer rails (thin vertical panels along each side).
+        total_height = riser_m * step_count
+        stringer_thickness = 0.04
+        for side_sign, side_name in [(-1, "left"), (1, "right")]:
+            offset_z = side_sign * (width_m * 0.5 + stringer_thickness * 0.5)
+            stringer = trimesh.creation.box(
+                extents=(run_m, total_height * 0.7, stringer_thickness)
+            )
+            rot = trimesh.transformations.rotation_matrix(yaw, [0, 1, 0])
+            sx = center_x - offset_z * sin_y
+            sz = center_z + offset_z * cos_y
+            tr = trimesh.transformations.translation_matrix(
+                [sx, total_height * 0.35, sz]
+            )
+            stringer.apply_transform(np.dot(tr, rot))
+            _apply_face_color(stringer, (60, 68, 80, 255))  # dark rail
+            scene.add_geometry(stringer, geom_name=f"stair_{idx}_{side_name}_stringer")
 
     _prune_tiny_scene_geometry(scene, min_xy_extent_m=0.12)
     return scene
@@ -514,6 +567,7 @@ def build_model_from_walls(
     staircase_candidates: list[StairCandidate] | None = None,
     wall_mask: np.ndarray | None = None,
     use_simple_stair_mesh: bool = False,
+    render_door_meshes: bool = True,
 ) -> str:
     """High-level helper to construct and export a 3D model from wall segments.
 
@@ -526,6 +580,7 @@ def build_model_from_walls(
         door_candidates: Optional detected door boxes.
         use_simple_stair_mesh: If True, use simple stair block meshes; otherwise
             export stepped stairs for more realistic geometry.
+        render_door_meshes: If True, render door frame and leaf meshes.
 
     Returns:
         Exported `.glb` file path.
@@ -539,5 +594,6 @@ def build_model_from_walls(
         staircase_candidates=staircase_candidates,
         wall_mask=wall_mask,
         use_simple_stair_mesh=use_simple_stair_mesh,
+        render_door_meshes=render_door_meshes,
     )
     return export_scene_glb(scene, output_path)

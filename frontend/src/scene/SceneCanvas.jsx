@@ -91,51 +91,64 @@ function BuildingModel({ url, onBounds }) {
   useEffect(() => {
     // Keep materials simple and high-contrast to avoid dark/black artifacts from malformed UVs/normals.
     const wallMaterial = new THREE.MeshLambertMaterial({
-      color: "#8fa6bf",
+      color: "#8a9aaa",
+      side: THREE.DoubleSide,
+    });
+
+    const wallCapMaterial = new THREE.MeshLambertMaterial({
+      color: "#4a5565",
       side: THREE.DoubleSide,
     });
 
     const floorMaterial = new THREE.MeshLambertMaterial({
-      color: "#dbe6f2",
+      color: "#c4cbd4",
       side: THREE.DoubleSide,
       transparent: true,
       opacity: 0.92,
     });
 
     const doorMaterial = new THREE.MeshStandardMaterial({
-      color: "#ff7a1a",
-      emissive: "#ff7a1a",
-      emissiveIntensity: 0.28,
+      color: "#8b6542",
       side: THREE.DoubleSide,
-      transparent: true,
-      opacity: 0.95,
-      roughness: 0.45,
-      metalness: 0.06,
+      roughness: 0.48,
+      metalness: 0.02,
+    });
+
+    const doorFrameMaterial = new THREE.MeshStandardMaterial({
+      color: "#4a3728",
+      side: THREE.DoubleSide,
+      roughness: 0.55,
+      metalness: 0.03,
     });
 
     const stairMaterial = new THREE.MeshStandardMaterial({
-      color: "#2da4ff",
-      emissive: "#2da4ff",
-      emissiveIntensity: 0.18,
+      color: "#a0aab5",
       side: THREE.DoubleSide,
-      roughness: 0.52,
+      roughness: 0.72,
       metalness: 0.04,
     });
 
+    const stairRailMaterial = new THREE.MeshStandardMaterial({
+      color: "#505a65",
+      side: THREE.DoubleSide,
+      roughness: 0.4,
+      metalness: 0.12,
+    });
+
     /**
-     * Infer semantic type when mesh names are missing in exported GLB.
+     * Infer semantic type from mesh name.
      * @param {THREE.Mesh} obj
-     * @returns {"floor"|"door"|"stair"|"wall"|"unknown"}
+     * @returns {"floor"|"door"|"door_frame"|"stair"|"stair_rail"|"wall"|"wall_cap"|"unknown"}
      */
     const inferMeshType = (obj) => {
       const name = String(obj.name || "").toLowerCase();
+      if (name.startsWith("door_frame_")) return "door_frame";
       if (name.startsWith("door_") || name.includes("door")) return "door";
+      if (name.startsWith("stair_") && name.includes("stringer")) return "stair_rail";
       if (name.startsWith("stair_") || name.includes("stair")) return "stair";
       if (name.includes("floor")) return "floor";
+      if (name.startsWith("wall_cap_")) return "wall_cap";
       if (name.startsWith("wall_") || name.includes("wall")) return "wall";
-
-      // No geometry-based semantic fallback for doors/stairs.
-      // It causes false positives on generic wall meshes and paints extra stairs.
       return "unknown";
     };
 
@@ -151,8 +164,11 @@ function BuildingModel({ url, onBounds }) {
 
       const kind = inferMeshType(obj);
       if (kind === "door") obj.material = doorMaterial;
+      else if (kind === "door_frame") obj.material = doorFrameMaterial;
       else if (kind === "stair") obj.material = stairMaterial;
+      else if (kind === "stair_rail") obj.material = stairRailMaterial;
       else if (kind === "floor") obj.material = floorMaterial;
+      else if (kind === "wall_cap") obj.material = wallCapMaterial;
       else if (kind === "wall") obj.material = wallMaterial;
       // unknown: preserve original GLB material instead of flattening to walls
     });
@@ -174,9 +190,12 @@ function BuildingModel({ url, onBounds }) {
 
     return () => {
       wallMaterial.dispose();
+      wallCapMaterial.dispose();
       floorMaterial.dispose();
       doorMaterial.dispose();
+      doorFrameMaterial.dispose();
       stairMaterial.dispose();
+      stairRailMaterial.dispose();
     };
   }, [scene, onBounds]);
 

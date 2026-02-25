@@ -148,24 +148,25 @@ export class NavScene {
     const gltf = await loader.loadAsync(modelUrl);
     this.modelRoot = gltf.scene;
 
-    // Enforce semantic materials by mesh name so walls/doors/stairs are visually distinct
-    // while avoiding neon-like debug colors.
+    // Enforce semantic materials by mesh name so walls/doors/stairs are visually distinct.
     this.modelRoot.traverse((obj) => {
       if (!obj.isMesh || !obj.material) return;
       const name = String(obj.name || "").toLowerCase();
 
       // Name-first semantic mapping from backend geom names.
       let kind = null;
-      if (name.startsWith("door_")) kind = "door";
+      if (name.startsWith("door_frame_")) kind = "door_frame";
+      else if (name.startsWith("door_")) kind = "door";
+      else if (name.startsWith("stair_") && name.includes("stringer")) kind = "stair_rail";
       else if (name.startsWith("stair_")) kind = "stair";
+      else if (name.startsWith("wall_cap_")) kind = "wall_cap";
       else if (name.startsWith("wall_")) kind = "wall";
       else if (name === "floor") kind = "floor";
 
       // IMPORTANT: if kind is unknown, keep GLB material as-is.
       if (!kind) return;
 
-      // Hide tiny accidental door artifacts ("orange stubs") while preserving
-      // real doors that have meaningful footprint/height.
+      // Only hide truly tiny door fragments (< 0.18m footprint or < 0.6m height).
       if (kind === "door" && obj.geometry) {
         obj.geometry.computeBoundingBox();
         const bb = obj.geometry.boundingBox;
@@ -174,7 +175,7 @@ export class NavScene {
           const sy = Math.max(0, bb.max.y - bb.min.y);
           const sz = Math.max(0, bb.max.z - bb.min.z);
           const footprint = Math.max(sx, sz);
-          if (footprint < 0.42 || sy < 1.55) {
+          if (footprint < 0.18 || sy < 0.6) {
             obj.visible = false;
             return;
           }
@@ -183,24 +184,42 @@ export class NavScene {
 
       const materials = {
         floor: new THREE.MeshStandardMaterial({
-          color: "#b9c1ca",
-          roughness: 0.95,
+          color: "#c4cbd4",
+          roughness: 0.92,
           metalness: 0.0,
         }),
         wall: new THREE.MeshStandardMaterial({
-          color: "#667789",
-          roughness: 0.74,
-          metalness: 0.03,
+          color: "#8a9aaa",
+          roughness: 0.65,
+          metalness: 0.02,
+          envMapIntensity: 0.3,
+        }),
+        wall_cap: new THREE.MeshStandardMaterial({
+          color: "#4a5565",
+          roughness: 0.5,
+          metalness: 0.05,
         }),
         door: new THREE.MeshStandardMaterial({
-          color: "#6d4a2f",
-          roughness: 0.54,
-          metalness: 0.04,
+          color: "#8b6542",
+          roughness: 0.48,
+          metalness: 0.02,
+          envMapIntensity: 0.15,
+        }),
+        door_frame: new THREE.MeshStandardMaterial({
+          color: "#4a3728",
+          roughness: 0.55,
+          metalness: 0.03,
         }),
         stair: new THREE.MeshStandardMaterial({
-          color: "#7d8c99",
-          roughness: 0.8,
-          metalness: 0.03,
+          color: "#a0aab5",
+          roughness: 0.72,
+          metalness: 0.04,
+          envMapIntensity: 0.2,
+        }),
+        stair_rail: new THREE.MeshStandardMaterial({
+          color: "#505a65",
+          roughness: 0.4,
+          metalness: 0.12,
         }),
       };
 

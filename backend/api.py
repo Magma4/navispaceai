@@ -449,6 +449,10 @@ def _write_debug_bundle(
         "wall_count": len(walls),
         "door_count": len(doors),
         "stair_count": len(stairs),
+        "stair_candidates": [
+            {"x": s.get("x"), "y": s.get("y"), "w": s.get("w"), "h": s.get("h"), "score": s.get("score")}
+            for s in stairs
+        ],
         "gray_shape": [int(gray.shape[0]), int(gray.shape[1])],
         "ml_used": bool(pre.get("ml_used")),
         "ml_device": pre.get("ml_device"),
@@ -612,6 +616,7 @@ def create_app() -> FastAPI:
                 staircase_candidates=stairs,
                 wall_mask=pre.get("denoised"),
                 use_simple_stair_mesh=False,
+                render_door_meshes=True,
             )
 
             STATE.grid = grid

@@ -606,9 +606,9 @@ def filter_door_candidates(
         darea = float(dw * dh)
         dshort = float(min(dw, dh))
         dlong = float(max(dw, dh))
-        if darea < 75.0 or darea > 3000.0:
+        if darea < 65.0 or darea > 4500.0:
             continue
-        if not (6.0 <= dshort <= 28.0 and 10.0 <= dlong <= 120.0):
+        if not (5.0 <= dshort <= 36.0 and 9.0 <= dlong <= 150.0):
             continue
 
         cx = int(door["x"] + dw / 2)
@@ -716,21 +716,30 @@ def filter_stair_candidates(
     kept = _dedupe_rect_candidates(kept, iou_threshold=0.4)
 
     def _score(stair: StairCandidate) -> float:
-        # Prefer explicit detector confidence; blend with boundary proximity
-        # so edge stairwells are favored over central false positives.
+        # Compactness is the strongest signal: real stairwells have both
+        # dimensions > 70px, while false positives from edge lines are thin.
+        w_px = max(1, int(stair.get("w", 1)))
+        h_px = max(1, int(stair.get("h", 1)))
+        min_side = float(min(w_px, h_px))
+        compactness = min_side * min_side  # quadratic boost for compact regions
+
+        # Raw detector score as secondary signal.
         if "score" in stair:
             try:
                 base = float(stair.get("score", 0.0))
             except Exception:
                 base = 0.0
         else:
-            base = float(int(stair.get("w", 1)) * int(stair.get("h", 1)))
+            base = float(w_px * h_px)
 
+        # Edge proximity bonus: stairs tend to be at building perimeter.
         cx = float(stair.get("x", 0)) + max(1.0, float(stair.get("w", 1))) * 0.5
         cy = float(stair.get("y", 0)) + max(1.0, float(stair.get("h", 1))) * 0.5
         edge_dist = min(cx - x0, x1 - cx, cy - y0, y1 - cy)
         edge_bonus = 1.0 + max(0.0, (80.0 - edge_dist)) / 140.0
-        return base * edge_bonus
+
+        # Compactness dominates, with base score and edge bonus as modifiers.
+        return compactness * math.sqrt(max(1.0, base)) * edge_bonus
 
     kept.sort(key=_score, reverse=True)
 
@@ -776,7 +785,7 @@ def detect_doors(
             area = w * h
 
             # Keep compact elongated regions typically corresponding to swing/openings.
-            if 32 <= area <= 5200 and 4 <= min(w, h) <= 48 and max(w, h) <= 140:
+            if 50 <= area <= 6200 and 4 <= min(w, h) <= 50 and max(w, h) <= 170:
                 ml_candidates.append({"x": int(x), "y": int(y), "w": int(w), "h": int(h)})
 
         if ml_candidates:
@@ -796,7 +805,7 @@ def detect_doors(
         short = min(w, h)
         long = max(w, h)
         aspect = long / max(1.0, float(short))
-        if 90 <= area <= 2800 and 6 <= short <= 26 and 12 <= long <= 110 and 1.2 <= aspect <= 5.2:
+        if 100 <= area <= 4000 and 6 <= short <= 32 and 12 <= long <= 140 and 1.3 <= aspect <= 5.8:
             candidates.append({"x": int(x), "y": int(y), "w": int(w), "h": int(h)})
 
     # Secondary pass: detect compact door-leaf arcs/strokes from edges and merge.
@@ -807,7 +816,7 @@ def detect_doors(
         area = w * h
         short = min(w, h)
         long = max(w, h)
-        if 80 <= area <= 1400 and 5 <= short <= 18 and 12 <= long <= 64:
+        if 70 <= area <= 2000 and 5 <= short <= 22 and 12 <= long <= 80:
             candidates.append({"x": int(x), "y": int(y), "w": int(w), "h": int(h)})
 
     return _dedupe_rect_candidates(candidates, iou_threshold=0.38)
@@ -816,7 +825,7 @@ def detect_doors(
 def detect_staircases(
     binary: np.ndarray,
     *,
-    min_area: int = 180,
+    min_area: int = 800,
     max_area: int = 30000,
     min_steps: int = 4,
 ) -> list[StairCandidate]:
@@ -842,6 +851,7 @@ def detect_staircases(
         w = int(stats[label, cv2.CC_STAT_WIDTH])
         h = int(stats[label, cv2.CC_STAT_HEIGHT])
         area = int(w * h)
+
         if area < int(min_area) or area > int(dynamic_max_area):
             continue
 
@@ -850,7 +860,11 @@ def detect_staircases(
             continue
 
         aspect = max(w, h) / max(1.0, min(w, h))
-        if aspect < 1.10:
+        if aspect < 1.10 or aspect > 5.0:
+            continue
+
+        # Reject thin strips that are not real stairwells.
+        if min(w, h) < 40:
             continue
 
         roi = fg[y : y + h, x : x + w]
@@ -859,7 +873,7 @@ def detect_staircases(
 
         # Stair areas should contain repeated strokes, not solid blobs.
         ink_ratio = float(np.count_nonzero(roi > 0)) / float(roi.size)
-        if ink_ratio < 0.015 or ink_ratio > 0.42:
+        if ink_ratio < 0.015 or ink_ratio > 0.60:
             continue
 
         roi_edges = cv2.Canny(roi, 35, 120)
@@ -910,10 +924,12 @@ def detect_staircases(
         std_gap = float(np.std(gaps))
 
         # Repeated treads/risers tend to have quasi-regular spacing.
-        if not (4.0 <= mean_gap <= 24.0 and std_gap <= 4.8):
+        if not (4.0 <= mean_gap <= 24.0 and std_gap <= 8.5):
             continue
 
-        score = float(len(filtered)) * float(dom_ratio) * (float(aspect) / (1.0 + float(std_gap)))
+        # Score: prefer more steps, higher dominance, moderate aspect, and larger/more compact regions.
+        compactness = float(min(w, h)) / 30.0
+        score = float(len(filtered)) * float(dom_ratio) * (float(aspect) / math.sqrt(1.0 + float(std_gap))) * math.sqrt(float(area)) * compactness
         candidates.append({"x": int(x), "y": int(y), "w": int(w), "h": int(h), "score": score})
 
     # Fallback: contour-driven search for simple/synthetic drawings.
@@ -927,12 +943,14 @@ def detect_staircases(
             if w > int(img_w * 0.80) or h > int(img_h * 0.80):
                 continue
             aspect = max(w, h) / max(1.0, min(w, h))
-            if aspect < 1.12:
+            if aspect < 1.12 or aspect > 5.0:
+                continue
+            if min(w, h) < 40:
                 continue
 
             roi = fg[y : y + h, x : x + w]
             ink_ratio = float(np.count_nonzero(roi > 0)) / float(max(1, roi.size))
-            if ink_ratio < 0.015 or ink_ratio > 0.42:
+            if ink_ratio < 0.015 or ink_ratio > 0.60:
                 continue
 
             roi_edges = cv2.Canny(roi, 40, 120)
@@ -962,4 +980,8 @@ def detect_staircases(
                 score = float(dom_count) * float(dom_ratio) * float(aspect)
                 candidates.append({"x": int(x), "y": int(y), "w": int(w), "h": int(h), "score": score})
 
-    return _dedupe_rect_candidates(candidates, iou_threshold=0.35)
+    result = _dedupe_rect_candidates(candidates, iou_threshold=0.35)
+    # Prefer the most compact (square-ish) candidate — real stairwells have
+    # high min(w,h), while false positives from edge lines are long and thin.
+    result.sort(key=lambda c: (min(int(c["w"]), int(c["h"])), c.get("score", 0)), reverse=True)
+    return result
