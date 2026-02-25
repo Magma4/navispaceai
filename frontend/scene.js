@@ -13,8 +13,7 @@ export class NavScene {
   constructor(container) {
     this.container = container;
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color("#e7edf3");
-    this.scene.fog = new THREE.Fog("#e7edf3", 35, 140);
+    this.scene.background = new THREE.Color("#dfe7ef");
 
     this.camera = new THREE.PerspectiveCamera(
       60,
@@ -30,7 +29,7 @@ export class NavScene {
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.05;
+    this.renderer.toneMappingExposure = 0.92;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     container.appendChild(this.renderer.domElement);
 
@@ -55,10 +54,10 @@ export class NavScene {
 
   /** Build static scene elements: lights, floor helper, and pick plane. */
   _buildEnvironment() {
-    const hemi = new THREE.HemisphereLight(0xf2f6fb, 0x6b7480, 0.62);
+    const hemi = new THREE.HemisphereLight(0xffffff, 0x4e5b6a, 0.5);
     this.scene.add(hemi);
 
-    const key = new THREE.DirectionalLight(0xfff9f0, 1.0);
+    const key = new THREE.DirectionalLight(0xffffff, 1.25);
     key.position.set(10, 20, 8);
     key.castShadow = true;
     key.shadow.mapSize.set(2048, 2048);
@@ -71,7 +70,7 @@ export class NavScene {
     key.shadow.bias = -0.00025;
     this.scene.add(key);
 
-    const fill = new THREE.DirectionalLight(0xd9e7ff, 0.33);
+    const fill = new THREE.DirectionalLight(0xd7e5ff, 0.22);
     fill.position.set(-12, 11, -8);
     this.scene.add(fill);
 
@@ -184,24 +183,24 @@ export class NavScene {
 
       const materials = {
         floor: new THREE.MeshStandardMaterial({
-          color: "#c3ccd6",
-          roughness: 0.93,
+          color: "#cfd7df",
+          roughness: 0.94,
           metalness: 0.0,
         }),
         wall: new THREE.MeshStandardMaterial({
-          color: "#e4e8ee",
-          roughness: 0.88,
-          metalness: 0.01,
+          color: "#8ea0b4",
+          roughness: 0.78,
+          metalness: 0.02,
         }),
         door: new THREE.MeshStandardMaterial({
-          color: "#6f4a2c",
-          roughness: 0.58,
-          metalness: 0.03,
+          color: "#7b5434",
+          roughness: 0.56,
+          metalness: 0.04,
         }),
         stair: new THREE.MeshStandardMaterial({
-          color: "#929eab",
-          roughness: 0.9,
-          metalness: 0.01,
+          color: "#6fa2d2",
+          roughness: 0.72,
+          metalness: 0.03,
         }),
       };
 
